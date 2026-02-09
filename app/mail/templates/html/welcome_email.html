@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Welcome to CrypAlgos</title>
+    <style>
+        /* Email Template Styles for CrypAlgos */
+        .email-container {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            background-color: #f4f4f4;
+            font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+            line-height: 1.6;
+            color: #333333;
+        }
+        .email-wrapper {
+            max-width: 600px;
+            margin: 0 auto;
+            background-color: #ffffff;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+        .email-header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #ffffff;
+            text-align: center;
+            padding: 40px 20px;
+        }
+        .logo {
+            font-size: 32px;
+            font-weight: bold;
+            margin: 0;
+            letter-spacing: 2px;
+        }
+        .tagline {
+            font-size: 14px;
+            margin: 10px 0 0 0;
+            opacity: 0.9;
+        }
+        .email-content {
+            padding: 40px 30px;
+        }
+        .greeting {
+            font-size: 24px;
+            font-weight: 600;
+            color: #333333;
+            margin: 0 0 20px 0;
+        }
+        .message {
+            font-size: 16px;
+            line-height: 1.8;
+            color: #555555;
+            margin: 0 0 30px 0;
+        }
+        .button-container {
+            text-align: center;
+            margin: 30px 0;
+        }
+        .primary-button {
+            display: inline-block;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #ffffff;
+            text-decoration: none;
+            padding: 15px 30px;
+            border-radius: 25px;
+            font-weight: 600;
+            font-size: 16px;
+            text-align: center;
+        }
+        .secondary-button {
+            display: inline-block;
+            background-color: transparent;
+            color: #667eea;
+            text-decoration: none;
+            padding: 12px 25px;
+            border: 2px solid #667eea;
+            border-radius: 25px;
+            font-weight: 600;
+            font-size: 14px;
+            text-align: center;
+            margin: 10px;
+        }
+        .success-box {
+            background-color: #e8f5e8;
+            border-left: 4px solid #4caf50;
+            padding: 20px;
+            margin: 25px 0;
+            border-radius: 4px;
+        }
+        .info-box {
+            background-color: #e3f2fd;
+            border-left: 4px solid #2196f3;
+            padding: 20px;
+            margin: 25px 0;
+            border-radius: 4px;
+        }
+        .email-footer {
+            background-color: #f8f9fa;
+            padding: 30px;
+            text-align: center;
+            border-top: 1px solid #e9ecef;
+        }
+        .footer-text {
+            font-size: 14px;
+            color: #888888;
+            margin: 5px 0;
+        }
+        .footer-links {
+            margin: 20px 0;
+        }
+        .footer-link {
+            color: #667eea;
+            text-decoration: none;
+            margin: 0 15px;
+            font-size: 14px;
+        }
+        .footer-link:hover {
+            text-decoration: underline;
+        }
+        .social-links {
+            margin: 20px 0;
+        }
+        .social-link {
+            display: inline-block;
+            margin: 0 10px;
+            color: #888888;
+            text-decoration: none;
+            font-size: 20px;
+        }
+        @media only screen and (max-width: 600px) {
+            .email-wrapper {
+                margin: 0;
+                border-radius: 0;
+            }
+            .email-content {
+                padding: 30px 20px;
+            }
+            .email-header {
+                padding: 30px 20px;
+            }
+            .logo {
+                font-size: 28px;
+            }
+            .greeting {
+                font-size: 22px;
+            }
+            .primary-button {
+                padding: 12px 25px;
+                font-size: 14px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="email-container">
+        <div class="email-wrapper">
+            <!-- Header -->
+            <div class="email-header">
+                <h1 class="logo">CrypAlgos</h1>
+                <p class="tagline">Advanced Cryptocurrency Trading Platform</p>
+            </div>
+
+            <!-- Content -->
+            <div class="email-content">
+                <h2 class="greeting">Welcome, {user_name}! 🎉</h2>
+
+                <p class="message">
+                    Congratulations! Your email has been successfully verified and your CrypAlgos account is now active.
+                    You're now part of an exclusive community of advanced cryptocurrency traders.
+                </p>
+
+                <div class="success-box">
+                    <p style="margin: 0; font-size: 16px; font-weight: 600;">
+                        🎯 Your account is ready to use!
+                    </p>
+                    <p style="margin: 10px 0 0 0; font-size: 14px;">
+                        Start exploring our powerful trading algorithms and portfolio management tools.
+                    </p>
+                </div>
+
+                <div class="button-container">
+                    <a href="{dashboard_link}" class="primary-button">
+                        Access My Dashboard
+                    </a>
+                    <a href="{trading_guide_link}" class="secondary-button">
+                        Trading Guide
+                    </a>
+                </div>
+
+                <p class="message">
+                    <strong>What's next?</strong>
+                </p>
+
+                <ul style="color: #555555; font-size: 16px; line-height: 1.8; margin: 20px 0; padding-left: 20px;">
+                    <li>Complete your profile and trading preferences</li>
+                    <li>Connect your preferred cryptocurrency exchanges</li>
+                    <li>Explore our algorithmic trading strategies</li>
+                    <li>Set up your first automated trading bot</li>
+                    <li>Join our community forums and trading discussions</li>
+                </ul>
+
+                <div class="info-box">
+                    <p style="margin: 0; font-size: 14px;">
+                        <strong>Security Tip:</strong> Enable two-factor authentication (2FA) for enhanced account security.
+                        You can set this up in your account settings.
+                    </p>
+                </div>
+
+                <p class="message">
+                    Need help getting started? Our support team is here to assist you at
+                    <a href="mailto:support@crypalgos.com" style="color: #667eea;">support@crypalgos.com</a>
+                </p>
+
+                <p class="message">
+                    Happy trading!<br>
+                    <strong>The CrypAlgos Team</strong>
+                </p>
+            </div>
+
+            <!-- Footer -->
+            <div class="email-footer">
+                <p class="footer-text">
+                    <strong>CrypAlgos Trading Platform</strong><br>
+                    Advanced algorithmic trading for cryptocurrency markets
+                </p>
+
+                <div class="footer-links">
+                    <a href="{website_url}" class="footer-link">Website</a>
+                    <a href="{support_url}" class="footer-link">Support</a>
+                    <a href="{privacy_url}" class="footer-link">Privacy Policy</a>
+                    <a href="{terms_url}" class="footer-link">Terms of Service</a>
+                </div>
+
+                <div class="social-links">
+                    <a href="{twitter_url}" class="social-link">🐦</a>
+                    <a href="{linkedin_url}" class="social-link">💼</a>
+                    <a href="{telegram_url}" class="social-link">📱</a>
+                    <a href="{discord_url}" class="social-link">💬</a>
+                </div>
+
+                <p class="footer-text">
+                    © 2025 CrypAlgos. All rights reserved.<br>
+                    This email was sent to {user_email}
+                </p>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
