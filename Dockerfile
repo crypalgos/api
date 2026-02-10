@@ -6,7 +6,6 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 WORKDIR /app
 
 ENV UV_COMPILE_BYTECODE=1
-ENV UV_SYSTEM_PYTHON=1
 ENV UV_LINK_MODE=copy
 
 COPY pyproject.toml uv.lock ./
@@ -26,16 +25,13 @@ RUN groupadd --gid 1000 appgroup && \
 
 WORKDIR /app
 
-COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
-COPY --from=builder /usr/local/bin /usr/local/bin
+COPY --from=builder --chown=appuser:appgroup /app/.venv /app/.venv
 COPY --chown=appuser:appgroup . .
 
 ENV PYTHONUNBUFFERED=1
-
-RUN pip install uvicorn
+ENV PATH="/app/.venv/bin:$PATH"
 
 USER appuser
-ENV PATH="/home/appuser/.local/bin:$PATH"
 
 EXPOSE 8000
 
