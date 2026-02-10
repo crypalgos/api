@@ -32,6 +32,8 @@ COPY --chown=appuser:appgroup . .
 
 ENV PYTHONUNBUFFERED=1
 
+RUN pip install uvicorn
+
 USER appuser
 ENV PATH="/home/appuser/.local/bin:$PATH"
 
