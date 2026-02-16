@@ -41,3 +41,7 @@ async def favicon() -> RedirectResponse:
 app.include_router(auth_router, prefix="/api/v1")
 app.include_router(session_router, prefix="/api/v1")
 app.include_router(user_router, prefix="/api/v1")
+
+# Setup Data Service
+from app.modules.data_service.manager import setup_data_service
+setup_data_service(app)

@@ -1,6 +1,6 @@
 from abc import ABC
 from collections.abc import Sequence
-from typing import Any, TypeVar
+from typing import Any, Generic, TypeVar
 
 from sqlalchemy import Row, RowMapping, delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -9,7 +9,7 @@ from sqlalchemy.orm import DeclarativeBase
 T = TypeVar("T", bound=DeclarativeBase)
 
 
-class BaseRepository[T](ABC):
+class BaseRepository(Generic[T], ABC):
     """
     Base repository class for CRUD operations.
     This class provides a generic interface for database operations.
