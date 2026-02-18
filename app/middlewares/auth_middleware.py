@@ -13,14 +13,14 @@ async def get_current_user(request: Request) -> dict[str, Any]:
     Extracts and validates JWT token, returns user information.
     """
     try:
-        # Try to get token from cookies first (for frontend)
+        # Priority 1: Get token from cookies (access_token)
         token = request.cookies.get("access_token")
 
-        # Fallback to Authorization header (for Postman/API testing)
+        # Priority 2: Fallback to Authorization header (Bearer token)
         if not token:
-            authorization = request.headers.get("Authorization")
-            if authorization and authorization.startswith("Bearer "):
-                token = authorization[7:]  # Remove "Bearer " prefix
+            auth_header = request.headers.get("Authorization")
+            if auth_header and auth_header.startswith("Bearer "):
+                token = auth_header[7:]
 
         if not token:
             raise UnauthorizedAccessException("Authorization token missing")

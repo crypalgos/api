@@ -37,14 +37,18 @@ from ..schema.user_schema import (  # noqa: E402
 
 def set_auth_cookies(response: Response, access_token: str, refresh_token: str) -> None:
     """Set HTTP-only cookies for authentication tokens"""
-    # Set access token cookie (short-lived)
+    is_prod = settings.env == "production"
+    cookie_samesite = "lax" if is_prod else "none"
+    cookie_secure = True if (is_prod or cookie_samesite == "none") else False
+
+    # Access token is non-HttpOnly in development to allow Bearer token fallback
     response.set_cookie(
         key="access_token",
         value=access_token,
         max_age=settings.access_token_expire_minutes * 60,  # Convert to seconds
-        httponly=True,
-        secure=settings.env == "production",
-        samesite="lax",
+        httponly=is_prod,
+        secure=cookie_secure,
+        samesite=cookie_samesite,
         path="/",
     )
 
@@ -54,16 +58,32 @@ def set_auth_cookies(response: Response, access_token: str, refresh_token: str) 
         value=refresh_token,
         max_age=settings.refresh_token_expire_minutes * 60,  # Convert to seconds
         httponly=True,
-        secure=settings.env == "production",  # Only HTTPS in production
-        samesite="lax",
+        secure=cookie_secure,
+        samesite=cookie_samesite,
         path="/",  # Ensure cookie is available site-wide
     )
 
 
+
+
 def clear_auth_cookies(response: Response) -> None:
     """Clear authentication cookies"""
-    response.delete_cookie(key="access_token", path="/")
-    response.delete_cookie(key="refresh_token", path="/")
+    is_prod = settings.env == "production"
+    cookie_samesite = "lax" if is_prod else "none"
+    cookie_secure = True if (is_prod or cookie_samesite == "none") else False
+
+    response.delete_cookie(
+        key="access_token",
+        path="/",
+        samesite=cookie_samesite,
+        secure=cookie_secure,
+    )
+    response.delete_cookie(
+        key="refresh_token",
+        path="/",
+        samesite=cookie_samesite,
+        secure=cookie_secure,
+    )
 
 
 async def get_auth_service(session: AsyncSession = Depends(get_db)) -> AuthService:
@@ -374,16 +394,8 @@ async def refresh_token(
         media_type="application/json",
     )
 
-    # Set new access token as HTTP-only cookie (keep the same refresh token)
-    response.set_cookie(
-        key="access_token",
-        value=result["access_token"],
-        max_age=settings.access_token_expire_minutes * 60,
-        httponly=True,
-        secure=settings.env == "production",
-        samesite="lax",
-        path="/",
-    )
+    # Set HTTP-only cookies for tokens
+    set_auth_cookies(response, result["access_token"], refresh_token)
 
     return response
 
