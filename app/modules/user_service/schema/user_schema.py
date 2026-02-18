@@ -98,7 +98,7 @@ class CheckVerificationCodeSchema(BaseModel):
 
 class VerifyUserResponseSchema(BaseModel):
     user: UserSchema = Field(..., description="User details")
-    tokens: dict = Field(..., description="Authentication tokens")
+    access_token: str = Field(..., description="Authentication tokens")
     message: str = Field(
         default="User verified and logged in successfully",
         description="Success message",

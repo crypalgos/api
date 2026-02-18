@@ -56,7 +56,7 @@ class GlobalExceptionHandler:
         ) -> JSONResponse:
             return BaseResponseHandler.error_response(
                 message="Unauthorized Access",
-                status_code=403,
+                status_code=401,
                 errors={"detail": exc.message},
             )
 
