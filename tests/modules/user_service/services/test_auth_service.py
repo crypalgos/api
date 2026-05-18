@@ -19,6 +19,7 @@ from app.modules.user_service.schema.user_schema import (
     UserLoginSchema,
     UserRegistrationSchema,
     VerifyUserSchema,
+    GoogleLoginSchema,
 )
 from app.modules.user_service.services.auth_service import AuthService
 
@@ -422,3 +423,136 @@ class TestAuthServicePasswordReset:
         # Act & Assert
         with pytest.raises(InvalidCredentialsException):
             await auth_service.reset_password(reset_data)
+
+
+class TestAuthServiceGoogle:
+    """Tests for user login via Google OAuth."""
+
+    @pytest.mark.asyncio
+    @patch("app.modules.user_service.services.auth_service.id_token.verify_oauth2_token")
+    async def test_login_google_existing_user_success(
+        self,
+        mock_verify,
+        auth_service: AuthService,
+        mock_user_repository: MagicMock,
+        sample_user: User,
+    ) -> None:
+        """Test successful Google login for an existing user."""
+        # Arrange
+        google_data = GoogleLoginSchema(id_token="valid_mock_token")
+        mock_verify.return_value = {
+            "email": sample_user.email,
+            "name": sample_user.name,
+            "iss": "https://accounts.google.com",
+            "aud": "mock_client_id",
+        }
+
+        mock_user_repository.get_by_email.return_value = sample_user
+
+        with (
+            patch(
+                "app.modules.user_service.services.auth_service.JWTUtils.create_access_token",
+                return_value="access_token",
+            ),
+            patch(
+                "app.modules.user_service.services.auth_service.JWTUtils.create_refresh_token",
+                return_value="refresh_token",
+            ),
+        ):
+            # Act
+            (
+                status_code,
+                access_token,
+                refresh_token,
+                expires_in,
+                user,
+            ) = await auth_service.login_google_user(google_data, "Mozilla/5.0", "127.0.0.1")
+
+        # Assert
+        assert status_code == 200
+        assert access_token == "access_token"
+        assert refresh_token == "refresh_token"
+        assert user.email == sample_user.email
+        mock_user_repository.get_by_email.assert_called_once_with(sample_user.email)
+
+    @pytest.mark.asyncio
+    @patch("app.modules.user_service.services.auth_service.id_token.verify_oauth2_token")
+    async def test_login_google_new_user_success(
+        self,
+        mock_verify,
+        auth_service: AuthService,
+        mock_user_repository: MagicMock,
+    ) -> None:
+        """Test successful Google login for a new user (registers them)."""
+        # Arrange
+        google_data = GoogleLoginSchema(id_token="valid_mock_token")
+        mock_verify.return_value = {
+            "email": "newgoogle@example.com",
+            "name": "Google User",
+            "iss": "https://accounts.google.com",
+            "aud": "mock_client_id",
+        }
+
+        mock_user_repository.get_by_email.return_value = None
+        mock_user_repository.get_by_username.return_value = None
+        mock_user_repository.create_user = AsyncMock(
+            return_value=User(
+                id="new-google-id",
+                name="Google User",
+                email="newgoogle@example.com",
+                username="newgoogle",
+                password="hashed_password",
+                is_verified=True,
+                created_at=datetime.now(UTC),
+                updated_at=datetime.now(UTC),
+            )
+        )
+
+        with (
+            patch(
+                "app.modules.user_service.services.auth_service.JWTUtils.create_access_token",
+                return_value="access_token",
+            ),
+            patch(
+                "app.modules.user_service.services.auth_service.JWTUtils.create_refresh_token",
+                return_value="refresh_token",
+            ),
+            patch(
+                "app.modules.user_service.services.auth_service.resend_email_service.send_welcome_email",
+                new_callable=AsyncMock,
+            ),
+        ):
+            # Act
+            (
+                status_code,
+                access_token,
+                refresh_token,
+                expires_in,
+                user,
+            ) = await auth_service.login_google_user(google_data, "Mozilla/5.0", "127.0.0.1")
+
+        # Assert
+        assert status_code == 200
+        assert access_token == "access_token"
+        assert refresh_token == "refresh_token"
+        assert user.email == "newgoogle@example.com"
+        assert user.username == "newgoogle"
+        mock_user_repository.create_user.assert_called_once()
+
+    @pytest.mark.asyncio
+    @patch("app.modules.user_service.services.auth_service.id_token.verify_oauth2_token")
+    async def test_login_google_invalid_token(
+        self,
+        mock_verify,
+        auth_service: AuthService,
+    ) -> None:
+        """Test Google login fails with invalid token."""
+        # Arrange
+        google_data = GoogleLoginSchema(id_token="invalid_token")
+        mock_verify.side_effect = ValueError("Invalid token signature")
+
+        # Act & Assert
+        with pytest.raises(InvalidCredentialsException) as exc_info:
+            await auth_service.login_google_user(google_data, "Mozilla/5.0", "127.0.0.1")
+
+        assert "Invalid Google token" in str(exc_info.value)

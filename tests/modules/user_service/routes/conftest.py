@@ -34,6 +34,7 @@ def mock_auth_service() -> MagicMock:
     # Pre-configure all async methods
     service.register_user = AsyncMock()
     service.login_user = AsyncMock()
+    service.login_google_user = AsyncMock()
     service.verify_user = AsyncMock()
     service.resend_verification_code = AsyncMock()
     service.check_verification_code = AsyncMock()

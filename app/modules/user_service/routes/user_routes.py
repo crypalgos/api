@@ -48,7 +48,7 @@ async def get_user_service(session: AsyncSession = Depends(get_db)) -> UserServi
         },
     },
 )
-async def get_current_user(
+async def get_my_profile(
     current_user: dict = Depends(get_current_user),
     user_service: UserService = Depends(get_user_service),
 ) -> JSONResponse:

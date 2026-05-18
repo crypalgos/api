@@ -21,7 +21,7 @@ class SessionService:
         self.user_repository = user_repository
 
     async def get_user_sessions(
-        self, user_id: str
+        self, user_id: str, current_refresh_token: str | None = None
     ) -> tuple[int, UserSessionsResponseSchema]:
         """Get all active sessions for a user"""
         logger.info(f"Fetching sessions for user: {user_id}")
@@ -38,6 +38,8 @@ class SessionService:
         session_schemas = []
         for session in sessions:
             session_schema = SessionSchema.model_validate(session)
+            if current_refresh_token and session.refresh_token == current_refresh_token:
+                session_schema.is_current = True
             session_schemas.append(session_schema)
 
         response = UserSessionsResponseSchema(
@@ -49,7 +51,7 @@ class SessionService:
     async def delete_session(
         self, user_id: str, session_id: str, current_refresh_token: str
     ) -> tuple[int, GenericMessageSchema]:
-        """Delete a specific session (cannot delete current session)"""
+        """Delete a specific session (allows deleting current session too, which logs user out)"""
         logger.info(f"Deleting session {session_id} for user: {user_id}")
         # Verify user exists
         user = await self.user_repository.get_by_id(user_id)
@@ -64,14 +66,6 @@ class SessionService:
 
         if session.user_id != user_id:
             raise ResourceNotFoundException("Session not found")
-
-        # Prevent deleting current session
-        if session.refresh_token == current_refresh_token:
-            from app.exceptions.exceptions import InvalidOperationException
-
-            raise InvalidOperationException(
-                "Cannot delete your current session. Use logout instead."
-            )
 
         # Delete session
         await self.session_repository.delete_session(session_id)

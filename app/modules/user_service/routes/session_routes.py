@@ -83,8 +83,10 @@ async def get_user_sessions(
     :param session_service: The SessionService instance to handle session operations.
     :return: JSONResponse with the status code and result.
     """
-    current_user_id, _ = current_user_data
-    status_code, result = await session_service.get_user_sessions(current_user_id)
+    current_user_id, current_refresh_token = current_user_data
+    status_code, result = await session_service.get_user_sessions(
+        current_user_id, current_refresh_token
+    )
     return JSONResponse(
         status_code=status_code,
         content=SuccessResponseSchema(data=result).model_dump(mode="json"),

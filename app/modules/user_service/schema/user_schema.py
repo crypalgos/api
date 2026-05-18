@@ -24,6 +24,7 @@ __all__ = [
     "UserSessionsResponseSchema",
     "CheckUsernameAvailabilitySchema",
     "UsernameAvailabilityResponseSchema",
+    "GoogleLoginSchema",
 ]
 
 
@@ -70,6 +71,10 @@ class UserRegistrationSchema(BaseModel):
 class UserLoginSchema(BaseModel):
     identifier: str = Field(..., description="Email or username for login")
     password: str = Field(..., description="Password for login")
+
+
+class GoogleLoginSchema(BaseModel):
+    id_token: str = Field(..., description="Google OAuth ID token")
 
 
 class UserLoginResponseSchema(BaseModel):
