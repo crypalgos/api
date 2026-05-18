@@ -51,6 +51,8 @@ class Settings(BaseSettings):
     resend_api_token: str = ""
     resend_from_email: str = "noreply@crypalgos.com"
     resend_from_name: str = "CrypAlgos Platform"
+    google_client_id: str = ""
+    google_client_secret: str = ""
 
     class Config:
         # computed once at import-time; can be overridden by setting ENV_FILE

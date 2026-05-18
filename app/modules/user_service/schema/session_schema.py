@@ -9,6 +9,7 @@ class SessionSchema(BaseModel):
     ip_address: str | None = Field(None, description="IP address")
     created_at: datetime = Field(..., description="Session creation time")
     expires_at: datetime = Field(..., description="Session expiration time")
+    is_current: bool = Field(default=False, description="Is this the current session")
 
     class Config:
         from_attributes = True

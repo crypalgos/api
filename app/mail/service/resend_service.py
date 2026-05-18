@@ -183,7 +183,7 @@ class ResendEmailService:
             result = await self._send_email(
                 to_email=user_email,
                 to_name=user_name,
-                subject="Verify Your CrypAlgos Account",
+                subject=f"Confirm your email address, {user_name}! 🚀",
                 html_content=html_content,
                 tags=[
                     {"name": "category", "value": "verification"},
@@ -319,7 +319,7 @@ class ResendEmailService:
             return await self._send_email(
                 to_email=user_email,
                 to_name=user_name,
-                subject="CrypAlgos Account Verification (Resent)",
+                subject=f"Your confirmation code, {user_name}! (Resent) 🔄",
                 html_content=html_content,
                 tags=[
                     {"name": "category", "value": "verification"},

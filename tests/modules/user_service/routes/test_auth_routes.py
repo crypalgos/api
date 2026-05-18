@@ -198,3 +198,48 @@ class TestAuthPasswordReset:
         )
 
         assert response.status_code == status.HTTP_200_OK
+
+
+class TestAuthGoogle:
+    """Tests for user login via Google OAuth endpoint."""
+
+    def test_google_login_success(
+        self, client: TestClient, override_get_db, override_auth_service: MagicMock
+    ) -> None:
+        """Test successful Google login."""
+        user_schema = UserSchema(
+            id="test-google-id",
+            name="Google User",
+            email="google@example.com",
+            username="google_user",
+            is_verified=True,
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
+        )
+        override_auth_service.login_google_user.return_value = (
+            200,
+            "access_token",
+            "refresh_token",
+            1800,  # expires_in
+            user_schema,
+        )
+
+        response = client.post(
+            "/api/v1/auth/google",
+            json={"id_token": "valid_mock_token"},
+        )
+
+        assert response.status_code == status.HTTP_200_OK
+        data = response.json()
+        assert data["data"]["user"]["email"] == "google@example.com"
+        assert data["data"]["access_token"] == "access_token"
+
+    def test_google_login_validation_error(
+        self, client: TestClient, override_get_db, override_auth_service: MagicMock
+    ) -> None:
+        """Test Google login with missing or invalid token format."""
+        response = client.post(
+            "/api/v1/auth/google",
+            json={},
+        )
+        assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY

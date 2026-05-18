@@ -23,6 +23,7 @@ from ..schema.user_schema import (  # noqa: E402
     CheckVerificationCodeSchema,
     ForgotPasswordSchema,
     GenericMessageSchema,
+    GoogleLoginSchema,
     RefreshTokenSchema,
     ResendVerificationSchema,
     ResetPasswordSchema,
@@ -208,6 +209,72 @@ async def login_user(
         user_schema,
     ) = await auth_service.login_user(login_data, user_agent, ip_address)
     logger.info(f"Login successful: {login_data.identifier}")
+
+    user_response = UserLoginResponseSchema(
+        user=user_schema,
+        access_token=access_token,
+        message="Login successful",
+    )
+
+    # Create JSONResponse first
+    json_response = BaseResponseHandler.success_response(
+        data=user_response, status_code=status_code
+    )
+
+    # Convert to Response object and set cookies
+    response = Response(
+        content=json_response.body,
+        status_code=json_response.status_code,
+        media_type="application/json",
+    )
+
+    # Set HTTP-only cookies for tokens
+    set_auth_cookies(response, access_token, refresh_token)
+
+    return response
+
+
+@auth_router.post(
+    "/google",
+    responses={
+        200: {
+            "model": SuccessResponseSchema[UserLoginResponseSchema],
+            "description": "When user logs in or registers successfully via Google",
+        },
+        401: {
+            "model": ErrorResponseSchema,
+            "description": "Invalid Google token",
+        },
+        422: {
+            "model": ErrorResponseSchema,
+            "description": "Validation error for the Google login data",
+        },
+    },
+)
+async def login_google_user(
+    google_data: GoogleLoginSchema,
+    request: Request,
+    response: Response,
+    auth_service: AuthService = Depends(get_auth_service),
+) -> Response:
+    """
+    Endpoint to login or register a user using a Google OAuth ID token.
+    Sets HTTP-only cookies for access and refresh tokens.
+    :param google_data: The Google ID token.
+    :param request: The request object to extract client info.
+    :param auth_service: The AuthService instance to handle user operations.
+    :return: Response with user data (tokens set as HTTP-only cookies).
+    """
+    user_agent, ip_address = get_client_info(request)
+    logger.info(f"Google login attempt from IP: {ip_address}")
+    (
+        status_code,
+        access_token,
+        refresh_token,
+        expires_in,
+        user_schema,
+    ) = await auth_service.login_google_user(google_data, user_agent, ip_address)
+    logger.info(f"Google login successful: {user_schema.email}")
 
     user_response = UserLoginResponseSchema(
         user=user_schema,

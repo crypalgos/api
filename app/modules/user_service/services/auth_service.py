@@ -1,5 +1,10 @@
 import logging
+import uuid
+import aiohttp
+from google.oauth2 import id_token
+from google.auth.transport import requests as google_requests
 
+from app.config.settings import settings
 from app.exceptions.exceptions import (
     InvalidCredentialsException,
     ResourceAlreadyExistsException,
@@ -16,6 +21,7 @@ from ..repositories.user_repository import UserRepository
 from ..schema.user_schema import (
     ForgotPasswordSchema,
     GenericMessageSchema,
+    GoogleLoginSchema,
     RefreshTokenSchema,
     ResendVerificationSchema,
     ResetPasswordSchema,
@@ -160,6 +166,91 @@ class AuthService:
             raise InvalidCredentialsException("Invalid email/username or password")
 
         # Create tokens and session
+        access_token, refresh_token, expires_in = await self._create_user_session(
+            user, user_agent, ip_address
+        )
+        user_schema = UserSchema.model_validate(user)
+
+        return 200, access_token, refresh_token, expires_in, user_schema
+
+    async def login_google_user(
+        self,
+        google_data: GoogleLoginSchema,
+        user_agent: str | None = None,
+        ip_address: str | None = None,
+    ) -> tuple[int, str, str, int, UserSchema]:
+        """Login or register user via Google OAuth ID token"""
+        token = google_data.id_token
+
+        # Verify Google ID token using the official third-party library
+        try:
+            client_id = settings.google_client_id if settings.google_client_id else None
+            # verify_oauth2_token verifies signature, audience, issuer, and expiration time
+            payload = id_token.verify_oauth2_token(
+                token, 
+                google_requests.Request(), 
+                audience=client_id
+            )
+        except ValueError as e:
+            raise InvalidCredentialsException(f"Invalid Google token: {str(e)}")
+
+        # Extract claims
+        email = payload.get("email")
+        name = payload.get("name") or email.split("@")[0]
+
+        if not email:
+            raise InvalidCredentialsException("Google token missing email claim")
+
+        # Check if user exists in database
+        user = await self.user_repository.get_by_email(email)
+
+        if user:
+            # If the user exists but is not verified, verify them since Google already verified their email
+            if not user.is_verified:
+                user = await self.user_repository.update_user(
+                    user.id,
+                    is_verified=True,
+                )
+        else:
+            # User does not exist, create a new Google-auth user!
+            # Generate a unique username derived from the email prefix
+            base_username = email.split("@")[0].lower()
+            # Clean username from non-alphanumeric chars
+            base_username = "".join(c for c in base_username if c.isalnum() or c == "_")
+            if len(base_username) < 3:
+                base_username = "google_user"
+
+            username = base_username
+            # Ensure uniqueness
+            counter = 1
+            while await self.user_repository.get_by_username(username):
+                username = f"{base_username}_{counter}"
+                counter += 1
+
+            # Generate a secure random password (never intended to be used directly)
+            random_password = uuid.uuid4().hex
+            hashed_password = PasswordUtils.generate_password_hash(random_password)
+
+            new_user = User(
+                name=name,
+                email=email,
+                username=username,
+                password=hashed_password,
+                is_verified=True,
+            )
+            user = await self.user_repository.create_user(new_user)
+
+            # Send welcome email for new sign up
+            try:
+                await resend_email_service.send_welcome_email(
+                    user_email=user.email, user_name=user.name
+                )
+            except Exception as e:
+                logger.error(
+                    f"Failed to send welcome email to {user.email}: {str(e)}"
+                )
+
+        # Create access and refresh tokens + session
         access_token, refresh_token, expires_in = await self._create_user_session(
             user, user_agent, ip_address
         )
