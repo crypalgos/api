@@ -374,5 +374,9 @@ class ResendEmailService:
             return False
 
 
-skip_validation = os.getenv("APP_ENV") == "testing" or os.getenv("ENV") == "testing"
+skip_validation = (
+    os.getenv("APP_ENV") in ("testing", "test")
+    or os.getenv("ENV") in ("testing", "test")
+    or (hasattr(settings, "env") and settings.env in ("testing", "test"))
+)
 resend_email_service = ResendEmailService(skip_validation=skip_validation)

@@ -68,8 +68,12 @@ class AuthService:
     async def register_user(
         self, user_data: UserRegistrationSchema
     ) -> tuple[int, UserRegistrationResponseSchema]:
-        """Register a new user or update existing unverified user"""
-        # Check for existing verified user by email
+        """Register a new user or update an existing unverified user"""
+        if settings.waitlist and user_data.email != "ashishjangde54@gmail.com":
+            raise UnauthorizedAccessException(
+                "Registration is restricted during pre-launch waitlist."
+            )
+
         existing_user = await self.user_repository.get_by_email(user_data.email)
         if existing_user and existing_user.is_verified:
             raise ResourceAlreadyExistsException(
@@ -155,6 +159,11 @@ class AuthService:
         if not user:
             raise InvalidCredentialsException("Invalid email/username or password")
 
+        if settings.waitlist and user.email != "ashishjangde54@gmail.com":
+            raise UnauthorizedAccessException(
+                "Access is restricted during pre-launch waitlist."
+            )
+
         # Check if user is verified
         if not user.is_verified:
             raise UnauthorizedAccessException(
@@ -200,6 +209,11 @@ class AuthService:
 
         if not email:
             raise InvalidCredentialsException("Google token missing email claim")
+
+        if settings.waitlist and email != "ashishjangde54@gmail.com":
+            raise UnauthorizedAccessException(
+                "Access is restricted during pre-launch waitlist."
+            )
 
         # Check if user exists in database
         user = await self.user_repository.get_by_email(email)
@@ -268,6 +282,11 @@ class AuthService:
         user = await self.user_repository.get_by_identifier(verify_data.identifier)
         if not user:
             raise ResourceNotFoundException("User not found")
+
+        if settings.waitlist and user.email != "ashishjangde54@gmail.com":
+            raise UnauthorizedAccessException(
+                "Access is restricted during pre-launch waitlist."
+            )
 
         if user.is_verified:
             raise ValidationException("User is already verified")

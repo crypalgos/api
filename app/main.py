@@ -6,6 +6,7 @@ from app.advices.global_exception_handler import GlobalExceptionHandler
 from app.modules.user_service.routes.auth_routes import auth_router
 from app.modules.user_service.routes.session_routes import session_router
 from app.modules.user_service.routes.user_routes import user_router
+from app.modules.user_service.routes.contact_routes import contact_router
 
 app = FastAPI(
     title="CrypAlgos Api Docs",
@@ -18,6 +19,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:3000",
+        "http://localhost:3001",
         "https://crypalgos.com",
         "https://www.crypalgos.com"
     ],
@@ -45,6 +47,7 @@ async def favicon() -> RedirectResponse:
 app.include_router(auth_router, prefix="/api/v1")
 app.include_router(session_router, prefix="/api/v1")
 app.include_router(user_router, prefix="/api/v1")
+app.include_router(contact_router, prefix="/api/v1")
 
 # Setup Data Service
 from app.modules.data_service.manager import setup_data_service
