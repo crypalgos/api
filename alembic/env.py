@@ -8,6 +8,8 @@ from app.config.settings import settings
 from app.config.base import Base
 from app.modules.user_service.models.session_model import Session
 from app.modules.user_service.models.user_model import User
+from app.modules.user_service.models.waitlist_model import Waitlist
+from app.modules.user_service.models.contact_model import ContactMessage
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

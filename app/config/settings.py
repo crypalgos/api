@@ -39,6 +39,7 @@ class Settings(BaseSettings):
     )
     env: str = "development"
     debug: bool = True
+    waitlist: bool = True
     refresh_token_secret_key: str = (
         "your-super-secret-refresh-key-change-this-in-production"
     )

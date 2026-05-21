@@ -606,3 +606,86 @@ async def logout_user(
     clear_auth_cookies(response)
 
     return response
+
+
+from fastapi.security import HTTPBearer
+from app.modules.user_service.repositories.waitlist_repository import WaitlistRepository
+from app.modules.user_service.services.waitlist_service import WaitlistService
+from app.modules.user_service.schema.waitlist_schema import WaitlistSignupSchema, WaitlistResponseSchema
+from app.middlewares.auth_middleware import get_admin_user
+
+bearer_security = HTTPBearer()
+
+async def get_waitlist_service(session: AsyncSession = Depends(get_db)) -> WaitlistService:
+    repository = WaitlistRepository(session)
+    return WaitlistService(repository)
+
+@auth_router.post(
+    "/waitlist",
+    responses={
+        201: {
+            "model": SuccessResponseSchema[WaitlistResponseSchema],
+            "description": "Successfully signed up for the waitlist",
+        },
+        400: {
+            "model": ErrorResponseSchema,
+            "description": "User already registered on waitlist",
+        },
+    },
+)
+async def join_waitlist(
+    signup_data: WaitlistSignupSchema,
+    waitlist_service: WaitlistService = Depends(get_waitlist_service),
+) -> JSONResponse:
+    """Public endpoint to register for pre-launch waitlist"""
+    status_code, result = await waitlist_service.join_waitlist(signup_data)
+    return BaseResponseHandler.success_response(data=result, status_code=status_code)
+
+@auth_router.get(
+    "/waitlist",
+    dependencies=[Depends(bearer_security)],
+    responses={
+        200: {
+            "model": SuccessResponseSchema[dict],
+            "description": "Successfully retrieved waitlist entries",
+        },
+        401: {
+            "model": ErrorResponseSchema,
+            "description": "Unauthorized access",
+        },
+    },
+)
+async def get_waitlist(
+    offset: int = 0,
+    limit: int = 50,
+    query: str = "",
+    admin_user: dict = Depends(get_admin_user),
+    waitlist_service: WaitlistService = Depends(get_waitlist_service),
+) -> JSONResponse:
+    """Admin-only endpoint to list waitlist subscribers"""
+    status_code, result = await waitlist_service.get_all_waitlist(offset, limit, query)
+    return BaseResponseHandler.success_response(data=result, status_code=status_code)
+
+@auth_router.delete(
+    "/waitlist/{email}",
+    dependencies=[Depends(bearer_security)],
+    responses={
+        200: {
+            "model": SuccessResponseSchema[GenericMessageSchema],
+            "description": "Successfully deleted waitlist entry",
+        },
+        404: {
+            "model": ErrorResponseSchema,
+            "description": "Waitlist entry not found",
+        },
+    },
+)
+async def delete_waitlist(
+    email: str,
+    admin_user: dict = Depends(get_admin_user),
+    waitlist_service: WaitlistService = Depends(get_waitlist_service),
+) -> JSONResponse:
+    """Admin-only endpoint to delete a waitlist subscriber by email"""
+    status_code, result = await waitlist_service.delete_waitlist_by_email(email)
+    return BaseResponseHandler.success_response(data=result, status_code=status_code)
+
