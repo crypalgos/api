@@ -21,6 +21,10 @@ dependencies = [
     "sqlalchemy[asyncio]>=2.0.46",
     "uvicorn>=0.30.0",
     "websockets>=16.0",
+    "clickhouse-connect>=0.11.0",
+    "jesse-rust==1.1.0",
+    "crypalgos-data",
+    "backtesting-engine",
 ]
 
 [dependency-groups]
@@ -180,3 +184,7 @@ quote-style = "double"
 indent-style = "space"
 skip-magic-trailing-comma = false
 line-ending = "auto"
+
+[tool.uv.sources]
+backtesting-engine = { path = "../backtesting_engine" }
+crypalgos-data = { git = "https://github.com/crypalgos/crypalgos-data.git", branch = "master" }
