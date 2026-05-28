@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Optional, Dict
 
 from pydantic import BaseModel, EmailStr, Field
 
@@ -103,11 +104,17 @@ class CheckVerificationCodeSchema(BaseModel):
 
 class VerifyUserResponseSchema(BaseModel):
     user: UserSchema = Field(..., description="User details")
-    access_token: str = Field(..., description="Authentication tokens")
+    access_token: Optional[str] = Field(None, description="JWT access token")
+    tokens: Optional[Dict[str, str]] = Field(None, description="Authentication tokens")
     message: str = Field(
         default="User verified and logged in successfully",
         description="Success message",
     )
+
+    def __init__(self, **data):
+        super().__init__(**data)
+        if self.tokens and not self.access_token:
+            self.access_token = self.tokens.get("access_token")
 
 
 class ForgotPasswordSchema(BaseModel):

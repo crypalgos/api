@@ -27,6 +27,20 @@ services:
       retries: 3
       start_period: 10s
 
+  valkey:
+    image: valkey/valkey:7.2-alpine
+    container_name: crypalgos-valkey
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    networks:
+      - crypalgos-network
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
 networks:
   crypalgos-network:
     driver: bridge

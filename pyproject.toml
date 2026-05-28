@@ -24,7 +24,9 @@ dependencies = [
     "clickhouse-connect>=0.11.0",
     "jesse-rust==1.1.0",
     "crypalgos-data",
-    "backtesting-engine",
+    "crypalgos-core",
+    "celery>=5.4.0",
+    "redis>=5.0.8",
 ]
 
 [dependency-groups]
@@ -186,5 +188,5 @@ skip-magic-trailing-comma = false
 line-ending = "auto"
 
 [tool.uv.sources]
-backtesting-engine = { path = "../backtesting_engine" }
+crypalgos-core = { path = "../crypalgos_core" }
 crypalgos-data = { git = "https://github.com/crypalgos/crypalgos-data.git", branch = "master" }

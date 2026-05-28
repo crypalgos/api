@@ -7,6 +7,7 @@ from app.modules.user_service.routes.auth_routes import auth_router
 from app.modules.user_service.routes.session_routes import session_router
 from app.modules.user_service.routes.user_routes import user_router
 from app.modules.user_service.routes.contact_routes import contact_router
+from app.modules.strategy_service.routes.strategy_routes import strategy_router
 
 app = FastAPI(
     title="CrypAlgos Api Docs",
@@ -48,6 +49,7 @@ app.include_router(auth_router, prefix="/api/v1")
 app.include_router(session_router, prefix="/api/v1")
 app.include_router(user_router, prefix="/api/v1")
 app.include_router(contact_router, prefix="/api/v1")
+app.include_router(strategy_router, prefix="/api/v1")
 
 # Setup Data Service
 from app.modules.data_service.manager import setup_data_service

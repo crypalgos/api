@@ -55,6 +55,20 @@ services:
       timeout: 5s
       retries: 5
 
+  valkey:
+    image: valkey/valkey:7.2-alpine
+    container_name: crypalgos-valkey-dev
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    networks:
+      - crypalgos-network
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
 volumes:
   postgres_data_dev:
     driver: local
