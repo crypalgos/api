@@ -4,6 +4,27 @@ from typing import Any, Dict, Optional
 from pydantic import BaseModel
 
 
+class ConditionExpression(BaseModel):
+    logical_gate: Optional[str] = None
+    leftOperand: str
+    operator: str
+    rightOperand: str
+
+class ConditionNodeDataSchema(BaseModel):
+    expressions: list[ConditionExpression] = []
+
+class ActionSequenceStep(BaseModel):
+    actionType: str
+    side: Optional[str] = None
+    amount: Optional[float] = None
+    sl: Optional[float] = None
+    tp: Optional[float] = None
+    limit_price: Optional[float] = None
+    percentage: Optional[float] = None
+
+class ActionNodeDataSchema(BaseModel):
+    steps: list[ActionSequenceStep] = []
+
 class StrategyCreateSchema(BaseModel):
     name: str
     description: Optional[str] = None
@@ -32,12 +53,9 @@ class UpdateCanvasRequestSchema(BaseModel):
     description: Optional[str] = None
 
 class BacktestTriggerRequestSchema(BaseModel):
-    exchange: str
-    symbol: str
     start_date: datetime
     end_date: datetime
     initial_capital: float = 10000.0
-    leverage: int = 1
 
 class BacktestResponseSchema(BaseModel):
     id: str

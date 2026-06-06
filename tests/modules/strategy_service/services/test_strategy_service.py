@@ -227,6 +227,7 @@ async def test_reset_to_visual_builder(
 
 
 @pytest.mark.asyncio
+@patch("app.modules.strategy_service.services.strategy_service.settings.sandbox_enabled", True)
 @patch("app.modules.strategy_service.tasks.run_asynchronous_backtest_task.delay")
 @patch("app.modules.strategy_service.services.strategy_service.DAGCompiler")
 async def test_trigger_backtest_success(
@@ -235,14 +236,37 @@ async def test_trigger_backtest_success(
     strategy_service: StrategyService,
     mock_strategy_repo: MagicMock
 ) -> None:
-    """Test triggering asynchronous Celery backtest successfully compiles canvas and enqueues task."""
+    """Test triggering asynchronous Celery backtest resolves exchange/symbol/leverage from canvas DataNode."""
     mock_compiler.compile_dag.return_value = "compiled_python_script"
-    
+
+    # Canvas JSON with a properly configured startNode and dataNode
+    canvas_with_data_node = {
+        "nodes": [
+            {
+                "id": "start-1",
+                "type": "startNode",
+                "data": {
+                    "exchange": "delta",
+                    "leverage": 10,
+                },
+            },
+            {
+                "id": "data-1",
+                "type": "dataNode",
+                "data": {
+                    "symbol": "BTCUSDT",
+                    "timeframe": "1h",
+                },
+            }
+        ],
+        "edges": [],
+    }
+
     mock_strat = Strategy(
         id="strat-123",
         user_id="user-123",
         name="Backtest Strat",
-        canvas_json={"nodes": []},
+        canvas_json=canvas_with_data_node,
         compiled_code="old_code",
         is_code_modified=False
     )
@@ -252,15 +276,13 @@ async def test_trigger_backtest_success(
     mock_task.id = "celery-uuid-999"
     mock_delay.return_value = mock_task
 
+    # New API: only pass dates and capital — no exchange/symbol/leverage
     code, result = await strategy_service.trigger_backtest(
         user_id="user-123",
         strategy_id="strat-123",
-        exchange="binance",
-        symbol="BTC/USDT",
         start_date=datetime(2026, 1, 1),
         end_date=datetime(2026, 1, 2),
         initial_capital=5000.0,
-        leverage=3
     )
 
     assert code == 202
@@ -268,16 +290,42 @@ async def test_trigger_backtest_success(
     assert result["task_id"] == "celery-uuid-999"
 
     # Verify visual code compiled and updated
-    mock_compiler.compile_dag.assert_called_once_with({"nodes": []})
+    mock_compiler.compile_dag.assert_called_once_with(canvas_with_data_node)
     mock_strategy_repo.update.assert_called_once_with("strat-123", compiled_code="compiled_python_script")
 
-    # Verify background Celery task enqueued with ISO dates
+    # Verify background Celery task enqueued with params resolved from dataNode
     mock_delay.assert_called_once_with(
         strategy_id="strat-123",
-        exchange="binance",
-        symbol="BTC/USDT",
+        exchange="delta",          # resolved from dataNode.data.source
+        symbol="BTCUSDT",          # resolved from dataNode.data.symbol (no USDT stripping now)
         start_date_iso="2026-01-01T00:00:00",
         end_date_iso="2026-01-02T00:00:00",
         initial_capital=5000.0,
-        leverage=3
+        leverage=10               # resolved from dataNode.data.leverage
     )
+
+
+@pytest.mark.asyncio
+async def test_trigger_backtest_missing_data_node(
+    strategy_service: StrategyService,
+    mock_strategy_repo: MagicMock
+) -> None:
+    """Test trigger_backtest raises ValueError when canvas has no DataNode configured."""
+    mock_strat = Strategy(
+        id="strat-123",
+        user_id="user-123",
+        name="No Data Node",
+        canvas_json={"nodes": [{"id": "start-1", "type": "startNode", "data": {}}], "edges": []},
+        compiled_code="",
+        is_code_modified=False
+    )
+    mock_strategy_repo.get_by_id.return_value = mock_strat
+
+    with pytest.raises(ValueError, match="no Data Node configured"):
+        await strategy_service.trigger_backtest(
+            user_id="user-123",
+            strategy_id="strat-123",
+            start_date=datetime(2026, 1, 1),
+            end_date=datetime(2026, 1, 2),
+            initial_capital=5000.0,
+        )

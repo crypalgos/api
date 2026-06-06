@@ -1,13 +1,15 @@
 services:
   api:
     build:
-      context: .
+      context: ..
       dockerfile: Dockerfile
       target: builder
     container_name: crypalgos-api-dev
     restart: unless-stopped
     ports:
       - "8000:8000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       - APP_ENV=development
       - DEBUG=true
@@ -17,6 +19,7 @@ services:
       - .env.dev
     volumes:
       - .:/app
+      - api_venv:/app/.venv
     depends_on:
       db:
         condition: service_healthy
@@ -72,6 +75,7 @@ services:
 volumes:
   postgres_data_dev:
     driver: local
+  api_venv:
 
 networks:
   crypalgos-network:

@@ -25,7 +25,7 @@ from app.modules.strategy_service.repositories.backtest_repository import (
 from app.modules.strategy_service.repositories.strategy_repository import (
     StrategyRepository,
 )
-from typing import Any
+from typing import Any, Optional
 from app.modules.strategy_service.schema.strategy_schema import (
     BacktestResponseSchema,
     StrategyResponseSchema,
@@ -255,20 +255,57 @@ class StrategyService:
                 os.remove(temp_path)
 
     async def trigger_backtest(
-        self, user_id: str, strategy_id: str, exchange: str, symbol: str,
-        start_date: datetime, end_date: datetime, initial_capital: float, leverage: int
+        self, user_id: str, strategy_id: str,
+        start_date: datetime, end_date: datetime, initial_capital: float,
     ) -> tuple[int, dict]:
-        # Normalize symbol: strip slashes/dashes (frontend sends BTC/USD, DB stores BTCUSD)
+        strategy = await self.strategy_repository.get_by_id(strategy_id)
+        if not strategy or strategy.user_id != user_id:
+            raise ResourceNotFoundException("Strategy not found")
+
+        # Resolve exchange, symbol, and leverage from canvas_json nodes
+        canvas_json = strategy.canvas_json or {}
+        nodes = canvas_json.get("nodes", [])
+        data_node = next((n for n in nodes if n.get("type") == "dataNode"), None)
+        start_node = next((n for n in nodes if n.get("type") == "startNode"), None)
+
+        if not data_node:
+            raise ValueError(
+                "Strategy has no Data Node configured. "
+                "Add and configure a Data Node (symbol) before running a backtest."
+            )
+        if not start_node:
+            raise ValueError("Strategy has no Start Node configured.")
+
+        data_node_data = data_node.get("data", {})
+        start_node_data = start_node.get("data", {})
+
+        exchange = start_node_data.get("exchange")
+        symbol = data_node_data.get("symbol")
+        leverage = start_node_data.get("leverage")
+
+        if not exchange:
+            raise ValueError("Start Node is missing 'exchange'. Open the Start Node and configure it.")
+        if not symbol:
+            raise ValueError("Data Node is missing 'symbol'. Open the Data Node and select an instrument.")
+
+        # Resolve leverage — default to 1 if not set (conservative)
+        if leverage is None:
+            leverage = 1
+        if isinstance(leverage, str):
+            try:
+                leverage = int(leverage.lower().replace("x", "").strip())
+            except (ValueError, TypeError):
+                leverage = 1
+        else:
+            leverage = int(leverage)
+
+        # Normalize symbol and exchange for backend use
         symbol = symbol.replace("/", "").replace("-", "").upper()
         exchange = exchange.strip().lower()
 
         # Validate date range
         if start_date >= end_date:
             raise ValueError("start_date must be before end_date.")
-
-        strategy = await self.strategy_repository.get_by_id(strategy_id)
-        if not strategy or strategy.user_id != user_id:
-            raise ResourceNotFoundException("Strategy not found")
 
         # Resolve correct active compiled script and persist it
         if not strategy.is_code_modified:

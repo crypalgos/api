@@ -218,12 +218,9 @@ async def execute_backtest(
     status_code, result = await strategy_service.trigger_backtest(
         user_id=user["user_id"],
         strategy_id=strategy_id,
-        exchange=bt_data.exchange,
-        symbol=bt_data.symbol,
         start_date=bt_data.start_date,
         end_date=bt_data.end_date,
         initial_capital=bt_data.initial_capital,
-        leverage=bt_data.leverage
     )
     return BaseResponseHandler.success_response(data=result, status_code=status_code)
 

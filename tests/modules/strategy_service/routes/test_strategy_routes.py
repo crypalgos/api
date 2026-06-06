@@ -180,12 +180,9 @@ class TestStrategyRoutes:
         override_strategy_service.trigger_backtest.return_value = (202, mock_response)
 
         payload = {
-            "exchange": "binance",
-            "symbol": "BTC/USDT",
             "start_date": "2026-01-01T00:00:00Z",
             "end_date": "2026-01-02T00:00:00Z",
             "initial_capital": 10000.0,
-            "leverage": 1
         }
 
         response = client.post(
@@ -197,14 +194,17 @@ class TestStrategyRoutes:
         assert response.status_code == status.HTTP_202_ACCEPTED
         assert response.json()["data"]["status"] == "enqueued"
         assert response.json()["data"]["task_id"] == "celery-task-id-abc"
-        
-        # Verify the service method was called with parsed datetimes
+
+        # Verify the route correctly passes only dates+capital to the service
+        # (exchange/symbol/leverage are now resolved internally by the service from canvas_json)
         called_args = override_strategy_service.trigger_backtest.call_args[1]
         assert called_args["user_id"] == "test-user-id"
         assert called_args["strategy_id"] == "strat-id-123"
-        assert called_args["exchange"] == "binance"
-        assert called_args["symbol"] == "BTC/USDT"
         assert called_args["initial_capital"] == 10000.0
-        assert called_args["leverage"] == 1
         assert isinstance(called_args["start_date"], datetime)
         assert isinstance(called_args["end_date"], datetime)
+        # exchange/symbol/leverage NOT in called_args — they're resolved server-side
+        assert "exchange" not in called_args
+        assert "symbol" not in called_args
+        assert "leverage" not in called_args
+

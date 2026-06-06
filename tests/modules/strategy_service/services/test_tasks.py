@@ -79,7 +79,7 @@ async def test_run_asynchronous_backtest_task_success(
     saved_backtest = mock_session.add.call_args[0][0]
     assert saved_backtest.strategy_id == "strat-123"
     assert saved_backtest.exchange == "binance"
-    assert saved_backtest.symbol == "BTC/USDT"
+    assert saved_backtest.symbol == "BTCUSDT"
     
     # Assert metrics_json structure and values
     assert saved_backtest.metrics_json["net_profit"] == 500.0
