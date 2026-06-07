@@ -236,6 +236,7 @@ async def _execute_backtest_internal(
             sandbox_dir = os.path.join(workspace_root, f"sandbox_tmp_{sandbox_id}")
             host_sandbox_dir = os.path.join(host_workspace_root, f"sandbox_tmp_{sandbox_id}")
             os.makedirs(sandbox_dir, exist_ok=True)
+            os.chmod(sandbox_dir, 0o777)
 
             try:
                 # Write strategy python code
