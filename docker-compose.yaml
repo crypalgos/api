@@ -53,15 +53,22 @@ services:
       args:
         - GITHUB_PAT=${GITHUB_PAT:-}
     container_name: crypalgos-celery-worker
+    user: "root"
     command: ["celery", "-A", "app.celery_app", "worker", "--loglevel=info"]
     restart: unless-stopped
     environment:
       - APP_ENV=production
+      - WORKSPACE_ROOT=${WORKSPACE_ROOT:-/app}
     env_file:
       - .env.prod
     depends_on:
       valkey:
         condition: service_healthy
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${WORKSPACE_ROOT:-/app}:${WORKSPACE_ROOT:-/app}
+    healthcheck:
+      disable: true
     networks:
       - crypalgos-network
     extra_hosts:
