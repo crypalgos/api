@@ -54,7 +54,7 @@ services:
         - GITHUB_PAT=${GITHUB_PAT:-}
     container_name: crypalgos-celery-worker
     user: "root"
-    command: ["celery", "-A", "app.celery_app", "worker", "--loglevel=info"]
+    command: ["/app/.venv/bin/celery", "-A", "app.celery_app", "worker", "--loglevel=info"]
     restart: unless-stopped
     environment:
       - APP_ENV=production
