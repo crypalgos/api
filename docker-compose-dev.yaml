@@ -1,9 +1,11 @@
 services:
   api:
     build:
-      context: ..
+      context: .
       dockerfile: Dockerfile
       target: builder
+      args:
+        - GITHUB_PAT=${GITHUB_PAT:-}
     container_name: crypalgos-api-dev
     restart: unless-stopped
     ports:
@@ -19,7 +21,6 @@ services:
       - .env.dev
     volumes:
       - .:/app
-      - api_venv:/app/.venv
     depends_on:
       db:
         condition: service_healthy

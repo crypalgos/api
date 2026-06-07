@@ -218,7 +218,7 @@ requires-dist = [
     { name = "asyncpg", specifier = ">=0.31.0" },
     { name = "celery", specifier = ">=5.4.0" },
     { name = "clickhouse-connect", specifier = ">=0.11.0" },
-    { name = "crypalgos-core", directory = "../crypalgos_core" },
+    { name = "crypalgos-core", git = "https://github.com/crypalgos/crypalgos_core.git?branch=master" },
     { name = "crypalgos-data", git = "https://github.com/crypalgos/crypalgos-data.git?branch=master" },
     { name = "fastapi", extras = ["standard"], specifier = ">=0.128.5" },
     { name = "google-auth", specifier = ">=2.53.0" },
@@ -739,7 +739,7 @@ wheels = [
 [[package]]
 name = "crypalgos-core"
 version = "1.0.0"
-source = { directory = "../crypalgos_core" }
+source = { git = "https://github.com/crypalgos/crypalgos_core.git?branch=master#aa6df7eb570e91960b4f390274226a204e00ff08" }
 dependencies = [
     { name = "clickhouse-connect" },
     { name = "crypalgos-data" },
@@ -748,19 +748,10 @@ dependencies = [
     { name = "polars" },
 ]
 
-[package.metadata]
-requires-dist = [
-    { name = "clickhouse-connect", specifier = ">=0.11.0" },
-    { name = "crypalgos-data", git = "https://github.com/crypalgos/crypalgos-data.git?branch=master" },
-    { name = "jesse-rust", specifier = "==1.1.0" },
-    { name = "numpy", specifier = ">=2.4.2" },
-    { name = "polars", specifier = ">=1.38.1" },
-]
-
 [[package]]
 name = "crypalgos-data"
 version = "0.1.0"
-source = { git = "https://github.com/crypalgos/crypalgos-data.git?branch=master#b5ca573311c1f33936a1b261222096cbaaaf252d" }
+source = { git = "https://github.com/crypalgos/crypalgos-data.git?branch=master#238853edd31e658a6dcf5196c22d01c9f26ad63c" }
 dependencies = [
     { name = "httpx" },
     { name = "pydantic" },
