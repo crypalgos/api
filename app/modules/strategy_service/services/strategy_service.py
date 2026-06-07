@@ -279,12 +279,10 @@ class StrategyService:
         data_node_data = data_node.get("data", {})
         start_node_data = start_node.get("data", {})
 
-        exchange = start_node_data.get("exchange")
+        exchange = start_node_data.get("exchange") or "delta"
         symbol = data_node_data.get("symbol")
         leverage = start_node_data.get("leverage")
 
-        if not exchange:
-            raise ValueError("Start Node is missing 'exchange'. Open the Start Node and configure it.")
         if not symbol:
             raise ValueError("Data Node is missing 'symbol'. Open the Data Node and select an instrument.")
 
