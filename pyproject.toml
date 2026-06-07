@@ -21,6 +21,12 @@ dependencies = [
     "sqlalchemy[asyncio]>=2.0.46",
     "uvicorn>=0.30.0",
     "websockets>=16.0",
+    "clickhouse-connect>=0.11.0",
+    "jesse-rust==1.1.0",
+    "crypalgos-data",
+    "crypalgos-core",
+    "celery>=5.4.0",
+    "redis>=5.0.8",
 ]
 
 [dependency-groups]
@@ -180,3 +186,7 @@ quote-style = "double"
 indent-style = "space"
 skip-magic-trailing-comma = false
 line-ending = "auto"
+
+[tool.uv.sources]
+crypalgos-core = { git = "https://github.com/crypalgos/crypalgos_core.git", branch = "master" }
+crypalgos-data = { git = "https://github.com/crypalgos/crypalgos-data.git", branch = "master" }

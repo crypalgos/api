@@ -4,10 +4,14 @@ services:
       context: .
       dockerfile: Dockerfile
       target: builder
+      args:
+        - GITHUB_PAT=${GITHUB_PAT:-}
     container_name: crypalgos-api-dev
     restart: unless-stopped
     ports:
       - "8000:8000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       - APP_ENV=development
       - DEBUG=true
@@ -55,9 +59,24 @@ services:
       timeout: 5s
       retries: 5
 
+  valkey:
+    image: valkey/valkey:7.2-alpine
+    container_name: crypalgos-valkey-dev
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    networks:
+      - crypalgos-network
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
 volumes:
   postgres_data_dev:
     driver: local
+  api_venv:
 
 networks:
   crypalgos-network:

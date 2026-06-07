@@ -28,9 +28,11 @@ pipeline {
         stage('Build and Deploy') {
             steps {
                 script {
-                    sh '''
-                        docker compose -f $COMPOSE_FILE up -d --build --remove-orphans
-                    '''
+                    withCredentials([usernamePassword(credentialsId: 'github_pat', usernameVariable: 'GITHUB_USER', passwordVariable: 'GITHUB_PAT')]) {
+                        sh '''
+                            GITHUB_PAT=${GITHUB_PAT} docker compose -f $COMPOSE_FILE up -d --build --remove-orphans
+                        '''
+                    }
                 }
             }
         }

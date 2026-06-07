@@ -111,6 +111,16 @@ class GlobalExceptionHandler:
 
             return BaseResponseHandler.validation_error_response(error_dict)
 
+        @app.exception_handler(ValueError)
+        async def handle_value_error(
+            _request: Request, exc: ValueError
+        ) -> JSONResponse:
+            return BaseResponseHandler.error_response(
+                message="Bad Request",
+                status_code=400,
+                errors={"detail": str(exc)},
+            )
+
         @app.exception_handler(Exception)
         async def handle_exception(_request: Request, exc: Exception) -> JSONResponse:
             logger.error(f"Unexpected error occurred: {exc}")

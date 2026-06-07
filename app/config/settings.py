@@ -2,6 +2,7 @@ import os
 from typing import Final
 
 from pydantic_settings import BaseSettings
+from dotenv import load_dotenv
 
 
 def _resolve_env_file() -> str:
@@ -33,6 +34,10 @@ def _resolve_env_file() -> str:
     return ".env.dev"
 
 
+# Load env variables into os.environ for external library compatibility
+load_dotenv(_resolve_env_file())
+
+
 class Settings(BaseSettings):
     database_url: str = (
         "postgresql+asyncpg://username:password@localhost:5432/your_database"
@@ -54,11 +59,13 @@ class Settings(BaseSettings):
     resend_from_name: str = "CrypAlgos Platform"
     google_client_id: str = ""
     google_client_secret: str = ""
+    sandbox_enabled: bool = False  # Set SANDBOX_ENABLED=true in .env.prod for Docker gVisor path
 
     class Config:
         # computed once at import-time; can be overridden by setting ENV_FILE
         env_file: Final[str] = _resolve_env_file()
         env_file_encoding = "utf-8"
+        extra = "ignore"
 
 
 settings = Settings()
