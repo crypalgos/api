@@ -34,7 +34,7 @@ RUN groupadd --gid 1000 appgroup && \
     useradd --uid 1000 --gid 1000 --shell /bin/bash --create-home appuser
 
 # Install docker CLI for spawning unprivileged sandboxes
-RUN apt-get update && apt-get install -y --no-install-recommends docker.io && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends docker.io docker-cli && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
