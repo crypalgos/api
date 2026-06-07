@@ -229,8 +229,12 @@ async def _execute_backtest_internal(
 
             # 3. Create host mount directory within workspace root for Docker volume isolation
             sandbox_id = str(uuid.uuid4())[:8]
-            workspace_root = os.getenv("WORKSPACE_ROOT", "/app")
+            workspace_root = os.getenv("WORKSPACE_ROOT", "/sandbox_tmp")
+            host_workspace_root = os.getenv("HOST_WORKSPACE_ROOT", workspace_root)
+            sandbox_image = os.getenv("SANDBOX_IMAGE", "api-api")
+            
             sandbox_dir = os.path.join(workspace_root, f"sandbox_tmp_{sandbox_id}")
+            host_sandbox_dir = os.path.join(host_workspace_root, f"sandbox_tmp_{sandbox_id}")
             os.makedirs(sandbox_dir, exist_ok=True)
 
             try:
@@ -360,8 +364,8 @@ if __name__ == "__main__":
                     "--network", "none",
                     "--memory", "512m",
                     "--cpus", "1.0",
-                    "-v", f"{sandbox_dir}:/sandbox",
-                    "api-api",
+                    "-v", f"{host_sandbox_dir}:/sandbox",
+                    sandbox_image,
                     "/app/.venv/bin/python", "/sandbox/sandbox_runner.py"
                 ]
                 
