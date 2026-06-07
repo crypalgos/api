@@ -359,11 +359,11 @@ if __name__ == "__main__":
                     f.write(sandbox_runner_code)
 
                 # 4. Trigger isolated unprivileged container execution via Docker
-                # Sets memory limit to 512MB, cpus to 1.0, and completely disables networking (--network none)
+                # Sets memory limit to 1GB, cpus to 1.0, and completely disables networking (--network none)
                 cmd = [
                     "docker", "run", "--rm",
                     "--network", "none",
-                    "--memory", "512m",
+                    "--memory", "1g",
                     "--cpus", "1.0",
                     "-v", f"{host_sandbox_dir}:/sandbox",
                     sandbox_image,
