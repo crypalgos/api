@@ -18,6 +18,8 @@ services:
       - .env.prod
     networks:
       - crypalgos-network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     healthcheck:
       test:
         [
@@ -62,6 +64,8 @@ services:
         condition: service_healthy
     networks:
       - crypalgos-network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
 networks:
   crypalgos-network:
