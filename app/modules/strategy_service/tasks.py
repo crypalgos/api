@@ -210,15 +210,29 @@ async def _execute_backtest_internal(
 
             greeks_list = []
             mark_list = []
-            try:
-                greeks_list = load_option_greeks_from_clickhouse(exchange.lower(), start_date, end_date)
-            except Exception as ge:
-                logger.warning(f"Option greeks prefetch failed: {ge}")
+            
+            # Conditionally fetch options datasets only if options are referenced in the strategy canvas
+            has_options = False
+            if strategy.canvas_json:
+                for node in strategy.canvas_json.get("nodes", []):
+                    if node.get("type") == "dataNode":
+                        data = node.get("data", {})
+                        if data.get("assetClass") == "OPTIONS" or "-" in data.get("symbol", ""):
+                            has_options = True
+                            break
 
-            try:
-                mark_list = load_option_mark_prices_from_clickhouse(exchange.lower(), start_date, end_date)
-            except Exception as me:
-                logger.warning(f"Option mark prefetch failed: {me}")
+            if has_options:
+                try:
+                    greeks_list = load_option_greeks_from_clickhouse(exchange.lower(), start_date, end_date)
+                except Exception as ge:
+                    logger.warning(f"Option greeks prefetch failed: {ge}")
+
+                try:
+                    mark_list = load_option_mark_prices_from_clickhouse(exchange.lower(), start_date, end_date)
+                except Exception as me:
+                    logger.warning(f"Option mark prefetch failed: {me}")
+            else:
+                logger.info("Skipping option greeks and option mark prices prefetch (no options data nodes in canvas).")
 
             market_data = {
                 "candles": candles_dict,
