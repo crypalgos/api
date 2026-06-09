@@ -9,14 +9,13 @@ from app.advices.base_response_handler import BaseResponseHandler
 from app.advices.responses import ErrorResponseSchema, SuccessResponseSchema
 from app.db.connect_db import get_db
 from app.middlewares.auth_middleware import get_current_user
-from app.modules.strategy_service.repositories.backtest_repository import (
-    BacktestRepository,
-)
+from app.modules.strategy_service.repositories.backtest_repository import BacktestRepository
+from app.modules.strategy_service.repositories.optimization_repository import OptimizationRepository
+from app.modules.strategy_service.repositories.walkforward_repository import WalkForwardRepository
+from app.modules.strategy_service.repositories.montecarlo_repository import MonteCarloRepository
 
 # Service & Repository imports
-from app.modules.strategy_service.repositories.strategy_repository import (
-    StrategyRepository,
-)
+from app.modules.strategy_service.repositories.strategy_repository import StrategyRepository
 from app.modules.strategy_service.schema.strategy_schema import (
     BacktestResponseSchema,
     BacktestTriggerRequestSchema,
@@ -27,18 +26,43 @@ from app.modules.strategy_service.schema.strategy_schema import (
     BacktestTriggerResponseSchema,
     PaginatedStrategiesResponseSchema,
     PaginatedBacktestsResponseSchema,
+    OptimizationRequestSchema,
+    OptimizationTriggerResponseSchema,
+    OptimizationRunResponseSchema,
+    PaginatedOptimizationRunsResponseSchema,
+    WalkForwardRequestSchema,
+    WalkForwardTriggerResponseSchema,
+    WalkForwardRunResponseSchema,
+    PaginatedWalkForwardRunsResponseSchema,
+    MonteCarloRequestSchema,
+    MonteCarloTriggerResponseSchema,
+    MonteCarloRunResponseSchema,
+    PaginatedMonteCarloRunsResponseSchema,
 )
 from app.modules.strategy_service.services.strategy_service import StrategyService
-from app.modules.strategy_service.tasks import run_asynchronous_backtest_task
+from app.modules.strategy_service.services.backtest_service import BacktestService
+from app.modules.strategy_service.services.optimization_service import OptimizationService
+from app.modules.strategy_service.services.walkforward_service import WalkForwardService
+from app.modules.strategy_service.services.montecarlo_service import MonteCarloService
 
 logger = logging.getLogger(__name__)
 
 strategy_router = APIRouter(prefix="/strategies", tags=["Strategies"])
 
 async def get_strategy_service(session: AsyncSession = Depends(get_db)) -> StrategyService:
-    strat_repo = StrategyRepository(session)
-    bt_repo = BacktestRepository(session)
-    return StrategyService(strat_repo, bt_repo)
+    return StrategyService(StrategyRepository(session))
+
+async def get_backtest_service(session: AsyncSession = Depends(get_db)) -> BacktestService:
+    return BacktestService(StrategyRepository(session), BacktestRepository(session))
+
+async def get_optimization_service(session: AsyncSession = Depends(get_db)) -> OptimizationService:
+    return OptimizationService(StrategyRepository(session), OptimizationRepository(session))
+
+async def get_walkforward_service(session: AsyncSession = Depends(get_db)) -> WalkForwardService:
+    return WalkForwardService(StrategyRepository(session), WalkForwardRepository(session))
+
+async def get_montecarlo_service(session: AsyncSession = Depends(get_db)) -> MonteCarloService:
+    return MonteCarloService(StrategyRepository(session), BacktestRepository(session), MonteCarloRepository(session))
 
 @strategy_router.post(
     "",
@@ -56,7 +80,7 @@ async def get_strategy_service(session: AsyncSession = Depends(get_db)) -> Strat
 async def create_strategy(
     strategy_data: StrategyCreateSchema,
     user: Annotated[dict, Depends(get_current_user)],
-    strategy_service: StrategyService = Depends(get_strategy_service)
+    backtest_service: BacktestService = Depends(get_backtest_service)
 ) -> JSONResponse:
     """Create a new visual React Flow strategy canvas, auto-generating standard code base."""
     status_code, result = await strategy_service.create_strategy(
@@ -215,7 +239,7 @@ async def execute_backtest(
     strategy_service: StrategyService = Depends(get_strategy_service)
 ) -> JSONResponse:
     """Run an institutional-grade simulation backtest asynchronously in a background sandbox."""
-    status_code, result = await strategy_service.trigger_backtest(
+    status_code, result = await backtest_service.trigger_backtest(
         user_id=user["user_id"],
         strategy_id=strategy_id,
         start_date=bt_data.start_date,
@@ -269,10 +293,10 @@ async def list_strategy_backtests(
     limit: int = 8,
     exchange: str | None = None,
     symbol: str | None = None,
-    strategy_service: StrategyService = Depends(get_strategy_service)
+    backtest_service: BacktestService = Depends(get_backtest_service)
 ) -> JSONResponse:
     """List historical backtest results for a specific strategy with pagination and filtering."""
-    status_code, result = await strategy_service.list_backtests(
+    status_code, result = await backtest_service.list_backtests(
         user_id=user["user_id"],
         strategy_id=strategy_id,
         page=page,
@@ -299,10 +323,10 @@ async def get_backtest(
     strategy_id: str,
     backtest_id: str,
     user: Annotated[dict, Depends(get_current_user)],
-    strategy_service: StrategyService = Depends(get_strategy_service)
+    backtest_service: BacktestService = Depends(get_backtest_service)
 ) -> JSONResponse:
     """Fetch a specific backtest run with full detailed curves and performance logs."""
-    status_code, result = await strategy_service.get_backtest(
+    status_code, result = await backtest_service.get_backtest(
         user_id=user["user_id"],
         strategy_id=strategy_id,
         backtest_id=backtest_id
@@ -326,12 +350,223 @@ async def delete_backtest(
     strategy_id: str,
     backtest_id: str,
     user: Annotated[dict, Depends(get_current_user)],
-    strategy_service: StrategyService = Depends(get_strategy_service)
+    backtest_service: BacktestService = Depends(get_backtest_service)
 ) -> JSONResponse:
     """Permanently delete a specific backtest run."""
-    status_code, result = await strategy_service.delete_backtest(
+    status_code, result = await backtest_service.delete_backtest(
         user_id=user["user_id"],
         strategy_id=strategy_id,
         backtest_id=backtest_id
+    )
+    return BaseResponseHandler.success_response(data=result, status_code=status_code)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Optimization Routes
+# ─────────────────────────────────────────────────────────────────────────────
+
+@strategy_router.post(
+    "/{strategy_id}/optimize",
+    responses={
+        202: {"description": "Optimization job enqueued"},
+        404: {"model": ErrorResponseSchema, "description": "Strategy not found"},
+    },
+)
+async def trigger_optimization(
+    strategy_id: str,
+    opt_data: OptimizationRequestSchema,
+    user: Annotated[dict, Depends(get_current_user)],
+    optimization_service: OptimizationService = Depends(get_optimization_service)
+) -> JSONResponse:
+    """Submit a parameter optimization job — grid or random search over the strategy's parameter space."""
+    status_code, result = await optimization_service.trigger_optimization(
+        user_id=user["user_id"],
+        strategy_id=strategy_id,
+        start_date=opt_data.start_date,
+        end_date=opt_data.end_date,
+        parameter_space=opt_data.parameter_space,
+        objective=opt_data.objective,
+        search_type=opt_data.search_type,
+        max_runs=opt_data.max_runs,
+        constraints=opt_data.constraints,
+        initial_capital=opt_data.initial_capital,
+    )
+    return BaseResponseHandler.success_response(data=result, status_code=status_code)
+
+
+@strategy_router.get(
+    "/{strategy_id}/optimizations",
+    responses={200: {"description": "Paginated list of optimization runs"}},
+)
+async def list_optimization_runs(
+    strategy_id: str,
+    user: Annotated[dict, Depends(get_current_user)],
+    page: int = 1,
+    limit: int = 8,
+    optimization_service: OptimizationService = Depends(get_optimization_service)
+) -> JSONResponse:
+    """List all optimization runs for a strategy with pagination."""
+    status_code, result = await optimization_service.list_optimization_runs(
+        user_id=user["user_id"], strategy_id=strategy_id, page=page, limit=limit
+    )
+    return BaseResponseHandler.success_response(data=result, status_code=status_code)
+
+
+@strategy_router.get(
+    "/{strategy_id}/optimizations/{run_id}",
+    responses={
+        200: {"description": "Optimization run details with leaderboard"},
+        404: {"model": ErrorResponseSchema, "description": "Run not found"},
+    },
+)
+async def get_optimization_run(
+    strategy_id: str,
+    run_id: str,
+    user: Annotated[dict, Depends(get_current_user)],
+    optimization_service: OptimizationService = Depends(get_optimization_service)
+) -> JSONResponse:
+    """Fetch a specific optimization run with best result and top-50 leaderboard."""
+    status_code, result = await optimization_service.get_optimization_run(
+        user_id=user["user_id"], strategy_id=strategy_id, run_id=run_id
+    )
+    return BaseResponseHandler.success_response(data=result, status_code=status_code)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Walk Forward Routes
+# ─────────────────────────────────────────────────────────────────────────────
+
+@strategy_router.post(
+    "/{strategy_id}/walkforward",
+    responses={
+        202: {"description": "Walk-forward job enqueued"},
+        404: {"model": ErrorResponseSchema, "description": "Strategy not found"},
+    },
+)
+async def trigger_walkforward(
+    strategy_id: str,
+    wf_data: WalkForwardRequestSchema,
+    user: Annotated[dict, Depends(get_current_user)],
+    walkforward_service: WalkForwardService = Depends(get_walkforward_service)
+) -> JSONResponse:
+    """Submit a walk-forward out-of-sample validation job."""
+    status_code, result = await walkforward_service.trigger_walkforward(
+        user_id=user["user_id"],
+        strategy_id=strategy_id,
+        start_date=wf_data.start_date,
+        end_date=wf_data.end_date,
+        parameter_space=wf_data.parameter_space,
+        objective=wf_data.objective,
+        train_period_months=wf_data.train_period_months,
+        test_period_months=wf_data.test_period_months,
+        step_months=wf_data.step_months,
+        constraints=wf_data.constraints,
+        initial_capital=wf_data.initial_capital,
+        window_type=wf_data.window_type,
+    )
+    return BaseResponseHandler.success_response(data=result, status_code=status_code)
+
+
+@strategy_router.get(
+    "/{strategy_id}/walkforwards",
+    responses={200: {"description": "Paginated list of walk-forward runs"}},
+)
+async def list_walkforward_runs(
+    strategy_id: str,
+    user: Annotated[dict, Depends(get_current_user)],
+    page: int = 1,
+    limit: int = 8,
+    walkforward_service: WalkForwardService = Depends(get_walkforward_service)
+) -> JSONResponse:
+    """List all walk-forward runs for a strategy with pagination."""
+    status_code, result = await walkforward_service.list_walkforward_runs(
+        user_id=user["user_id"], strategy_id=strategy_id, page=page, limit=limit
+    )
+    return BaseResponseHandler.success_response(data=result, status_code=status_code)
+
+
+@strategy_router.get(
+    "/{strategy_id}/walkforwards/{run_id}",
+    responses={
+        200: {"description": "Walk-forward run details with window summary"},
+        404: {"model": ErrorResponseSchema, "description": "Run not found"},
+    },
+)
+async def get_walkforward_run(
+    strategy_id: str,
+    run_id: str,
+    user: Annotated[dict, Depends(get_current_user)],
+    walkforward_service: WalkForwardService = Depends(get_walkforward_service)
+) -> JSONResponse:
+    """Fetch a specific walk-forward run with full KPI summary and window table."""
+    status_code, result = await walkforward_service.get_walkforward_run(
+        user_id=user["user_id"], strategy_id=strategy_id, run_id=run_id
+    )
+    return BaseResponseHandler.success_response(data=result, status_code=status_code)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Monte Carlo Routes
+# ─────────────────────────────────────────────────────────────────────────────
+
+@strategy_router.post(
+    "/{strategy_id}/montecarlo",
+    responses={
+        202: {"description": "Monte Carlo job enqueued"},
+        404: {"model": ErrorResponseSchema, "description": "Strategy or source backtest not found"},
+    },
+)
+async def trigger_montecarlo(
+    strategy_id: str,
+    mc_data: MonteCarloRequestSchema,
+    user: Annotated[dict, Depends(get_current_user)],
+    montecarlo_service: MonteCarloService = Depends(get_montecarlo_service)
+) -> JSONResponse:
+    """Submit a Monte Carlo simulation job — consumes trades from an existing backtest (read-only)."""
+    status_code, result = await montecarlo_service.trigger_montecarlo(
+        user_id=user["user_id"],
+        strategy_id=strategy_id,
+        source_backtest_id=mc_data.source_backtest_id,
+        simulation_count=mc_data.simulation_count,
+        method=mc_data.method,
+        random_seed=mc_data.random_seed,
+    )
+    return BaseResponseHandler.success_response(data=result, status_code=status_code)
+
+
+@strategy_router.get(
+    "/{strategy_id}/montecarlos",
+    responses={200: {"description": "Paginated list of Monte Carlo runs"}},
+)
+async def list_montecarlo_runs(
+    strategy_id: str,
+    user: Annotated[dict, Depends(get_current_user)],
+    page: int = 1,
+    limit: int = 8,
+    montecarlo_service: MonteCarloService = Depends(get_montecarlo_service)
+) -> JSONResponse:
+    """List all Monte Carlo runs for a strategy with pagination."""
+    status_code, result = await montecarlo_service.list_montecarlo_runs(
+        user_id=user["user_id"], strategy_id=strategy_id, page=page, limit=limit
+    )
+    return BaseResponseHandler.success_response(data=result, status_code=status_code)
+
+
+@strategy_router.get(
+    "/{strategy_id}/montecarlos/{run_id}",
+    responses={
+        200: {"description": "Monte Carlo run details with probability distributions"},
+        404: {"model": ErrorResponseSchema, "description": "Run not found"},
+    },
+)
+async def get_montecarlo_run(
+    strategy_id: str,
+    run_id: str,
+    user: Annotated[dict, Depends(get_current_user)],
+    montecarlo_service: MonteCarloService = Depends(get_montecarlo_service)
+) -> JSONResponse:
+    """Fetch a specific Monte Carlo run with full statistical distribution summary."""
+    status_code, result = await montecarlo_service.get_montecarlo_run(
+        user_id=user["user_id"], strategy_id=strategy_id, run_id=run_id
     )
     return BaseResponseHandler.success_response(data=result, status_code=status_code)

@@ -173,6 +173,7 @@ git commit -m "Add fastapi-users"
 api/
 ├── app/                          # Application code
 │   ├── main.py                   # FastAPI app entry point
+│   ├── celery_app.py             # Celery application & worker configuration
 │   ├── advices/                  # Response handlers & exception handling
 │   │   ├── base_response_handler.py
 │   │   ├── global_exception_handler.py
@@ -192,47 +193,47 @@ api/
 │   ├── middlewares/              # HTTP middlewares
 │   │   └── auth_middleware.py    # JWT validation
 │   └── modules/                  # Feature modules
-│       └── user_service/         # User management module
-│           ├── models/           # SQLAlchemy models
-│           │   ├── user_model.py
-│           │   └── session_model.py
-│           ├── repositories/     # Data access layer
-│           │   ├── user_repository.py
-│           │   └── session_repository.py
-│           ├── routes/           # API endpoints
-│           │   ├── auth_routes.py
-│           │   ├── user_routes.py
-│           │   └── session_routes.py
-│           ├── schema/           # Pydantic schemas
-│           │   ├── user_schema.py
-│           │   └── session_schema.py
-│           ├── services/         # Business logic
-│           │   ├── auth_service.py
-│           │   ├── user_service.py
-│           │   └── session_service.py
-│           └── utils/            # Utility functions
-│               └── auth_utils.py # JWT & password utils
+│       ├── user_service/         # User management module
+│       │   ├── models/           # SQLAlchemy models
+│       │   ├── repositories/     # Data access layer
+│       │   ├── routes/           # API endpoints
+│       │   ├── schema/           # Pydantic schemas
+│       │   ├── services/         # Business logic
+│       │   └── utils/            # Utility functions
+│       ├── strategy_service/     # Strategy management & execution module
+│       │   ├── controllers/      # Strategy controllers
+│       │   ├── models/           # SQLAlchemy models
+│       │   ├── repositories/     # Strategy repositories
+│       │   ├── routes/           # Strategy API routes
+│       │   ├── schema/           # Strategy Pydantic schemas
+│       │   ├── services/         # Strategy business logic
+│       │   └── tasks.py          # Celery background tasks
+│       └── data_service/         # Data ingestion & market data module
+│           ├── clients/          # API & WebSocket clients
+│           ├── services/         # Data services
+│           └── manager.py        # Connection manager
 ├── alembic/                      # Database migrations
 │   ├── versions/                 # Migration files
-│   └── env.py
-├── tests/                        # Test suite (76 tests, 100% coverage)
-│   ├── conftest.py               # Test fixtures
-│   └── modules/
-│       └── user_service/
-│           ├── repositories/     # Repository tests
-│           ├── routes/           # API endpoint tests
-│           └── services/         # Business logic tests
+│   ├── env.py                    # Migration configuration
+│   └── script.py.mako            # Migration template
+├── tests/                        # Test suite
+│   ├── conftest.py               # Root test fixtures
+│   ├── test_main.py              # Main API endpoint tests
+│   ├── verify_streamer.py        # Streamer verification utility
+│   └── modules/                  # Module tests
+│       ├── user_service/         # User service test suite
+│       └── strategy_service/     # Strategy service test suite
 ├── docs/                         # Documentation
 │   ├── DEVELOPMENT.md            # Development guide
 │   ├── DEPLOYMENT.md             # Deployment instructions
-│   └── ARCHITECTURE.md           # Architecture overview
+│   ├── ARCHITECTURE.md           # Architecture overview
+│   └── README.md                 # Docs overview
 ├── Dockerfile                    # Production image
 ├── Dockerfile.dev                # Development image
 ├── docker-compose.yaml           # Production compose
 ├── docker-compose-dev.yaml       # Development compose
-├── pyproject.toml                # uv & tool config
-├── requirements.txt              # Production dependencies
-├── requirements-dev.txt          # Development dependencies
+├── pyproject.toml                # uv & tool configuration
+├── uv.lock                       # uv lockfile (dependency lock)
 └── Makefile                      # Development commands
 ```
 

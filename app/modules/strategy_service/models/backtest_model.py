@@ -36,15 +36,23 @@ class Backtest(Base):
     initial_capital: Mapped[float] = mapped_column(Float, nullable=False, default=10000.0)
     leverage: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
     
-    # Serialized performance indicators (win_rate, sharpe_ratio, net_profit, max_drawdown)
-    metrics_json: Mapped[Dict[str, Any]] = mapped_column(JSON, nullable=False)
+    # Status tracking (PENDING, RUNNING, COMPLETED, FAILED)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="PENDING")
     
-    # 1,000-Point sampled equity/drawdown timelines and trade lists for charting
-    charting_json: Mapped[Dict[str, Any]] = mapped_column(JSON, nullable=False)
+    # Serialized performance indicators (win_rate, sharpe_ratio, net_profit, max_drawdown)
+    metrics_json: Mapped[Dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    
+    # Serialized charting arrays (equity_curve, drawdown_curve, trades)
+    charting_json: Mapped[Dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+
+    progress_json: Mapped[Dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    credits_used: Mapped[int] = mapped_column(Integer, nullable=False, default=5)
     
     created_at: Mapped[DateTime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+    started_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # Relationships
     strategy: Mapped["Strategy"] = relationship("Strategy", back_populates="backtests")
