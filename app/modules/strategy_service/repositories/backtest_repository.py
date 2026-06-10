@@ -20,19 +20,12 @@ class BacktestRepository(BaseRepository[Backtest]):
         return list(result.scalars().all())
 
     async def get_backtests_paginated(
-        self, strategy_id: str, page: int = 1, limit: int = 8, exchange: str | None = None, symbol: str | None = None
+        self, strategy_id: str, page: int = 1, limit: int = 8
     ) -> dict[str, Any]:
         """Retrieve a paginated, filtered list of backtests belonging to a strategy."""
         offset = (page - 1) * limit
         stmt = select(Backtest).where(Backtest.strategy_id == strategy_id)
         count_stmt = select(func.count()).select_from(Backtest).where(Backtest.strategy_id == strategy_id)
-
-        if exchange:
-            stmt = stmt.where(Backtest.exchange.ilike(f"%{exchange}%"))
-            count_stmt = count_stmt.where(Backtest.exchange.ilike(f"%{exchange}%"))
-        if symbol:
-            stmt = stmt.where(Backtest.symbol.ilike(f"%{symbol}%"))
-            count_stmt = count_stmt.where(Backtest.symbol.ilike(f"%{symbol}%"))
 
         stmt = stmt.order_by(Backtest.created_at.desc())
 

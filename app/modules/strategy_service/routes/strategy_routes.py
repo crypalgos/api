@@ -3,6 +3,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
+from fastapi.security import HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.advices.base_response_handler import BaseResponseHandler
@@ -47,6 +48,7 @@ from app.modules.strategy_service.services.montecarlo_service import MonteCarloS
 
 logger = logging.getLogger(__name__)
 
+security = HTTPBearer()
 strategy_router = APIRouter(prefix="/strategies", tags=["Strategies"])
 
 async def get_strategy_service(session: AsyncSession = Depends(get_db)) -> StrategyService:
@@ -66,10 +68,15 @@ async def get_montecarlo_service(session: AsyncSession = Depends(get_db)) -> Mon
 
 @strategy_router.post(
     "",
+    dependencies=[Depends(security)],
     responses={
         201: {
             "model": SuccessResponseSchema[StrategyResponseSchema],
             "description": "Visual strategy canvas successfully created",
+        },
+        401: {
+            "model": ErrorResponseSchema,
+            "description": "Invalid or missing authentication token",
         },
         422: {
             "model": ErrorResponseSchema,
@@ -80,7 +87,7 @@ async def get_montecarlo_service(session: AsyncSession = Depends(get_db)) -> Mon
 async def create_strategy(
     strategy_data: StrategyCreateSchema,
     user: Annotated[dict, Depends(get_current_user)],
-    backtest_service: BacktestService = Depends(get_backtest_service)
+    strategy_service: StrategyService = Depends(get_strategy_service)
 ) -> JSONResponse:
     """Create a new visual React Flow strategy canvas, auto-generating standard code base."""
     status_code, result = await strategy_service.create_strategy(
@@ -93,10 +100,15 @@ async def create_strategy(
 
 @strategy_router.get(
     "",
+    dependencies=[Depends(security)],
     responses={
         200: {
             "model": SuccessResponseSchema[PaginatedStrategiesResponseSchema],
             "description": "Successfully listed paginated strategies belonging to the user",
+        },
+        401: {
+            "model": ErrorResponseSchema,
+            "description": "Invalid or missing authentication token",
         },
     },
 )
@@ -118,10 +130,15 @@ async def list_strategies(
 
 @strategy_router.get(
     "/{strategy_id}",
+    dependencies=[Depends(security)],
     responses={
         200: {
             "model": SuccessResponseSchema[StrategyResponseSchema],
             "description": "Successfully retrieved target strategy",
+        },
+        401: {
+            "model": ErrorResponseSchema,
+            "description": "Invalid or missing authentication token",
         },
         404: {
             "model": ErrorResponseSchema,
@@ -140,10 +157,15 @@ async def get_strategy(
 
 @strategy_router.put(
     "/{strategy_id}/code",
+    dependencies=[Depends(security)],
     responses={
         200: {
             "model": SuccessResponseSchema[dict],
             "description": "Successfully saved Monaco code modification, visual flow desynchronized",
+        },
+        401: {
+            "model": ErrorResponseSchema,
+            "description": "Invalid or missing authentication token",
         },
         404: {
             "model": ErrorResponseSchema,
@@ -167,10 +189,15 @@ async def save_monaco_code(
 
 @strategy_router.put(
     "/{strategy_id}/canvas",
+    dependencies=[Depends(security)],
     responses={
         200: {
             "model": SuccessResponseSchema[StrategyResponseSchema],
             "description": "Canvas saved and recompiled to Python successfully",
+        },
+        401: {
+            "model": ErrorResponseSchema,
+            "description": "Invalid or missing authentication token",
         },
         404: {
             "model": ErrorResponseSchema,
@@ -196,10 +223,15 @@ async def update_canvas(
 
 @strategy_router.post(
     "/{strategy_id}/reset-builder",
+    dependencies=[Depends(security)],
     responses={
         200: {
             "model": SuccessResponseSchema[StrategyResponseSchema],
             "description": "Successfully reset code custom changes back to visual canvas sync status",
+        },
+        401: {
+            "model": ErrorResponseSchema,
+            "description": "Invalid or missing authentication token",
         },
         404: {
             "model": ErrorResponseSchema,
@@ -221,10 +253,15 @@ async def reset_to_visual_builder(
 
 @strategy_router.post(
     "/{strategy_id}/backtest",
+    dependencies=[Depends(security)],
     responses={
         202: {
             "model": SuccessResponseSchema[BacktestTriggerResponseSchema],
             "description": "Backtest enqueued successfully",
+        },
+        401: {
+            "model": ErrorResponseSchema,
+            "description": "Invalid or missing authentication token",
         },
         404: {
             "model": ErrorResponseSchema,
@@ -236,7 +273,7 @@ async def execute_backtest(
     strategy_id: str,
     bt_data: BacktestTriggerRequestSchema,
     user: Annotated[dict, Depends(get_current_user)],
-    strategy_service: StrategyService = Depends(get_strategy_service)
+    backtest_service: BacktestService = Depends(get_backtest_service)
 ) -> JSONResponse:
     """Run an institutional-grade simulation backtest asynchronously in a background sandbox."""
     status_code, result = await backtest_service.trigger_backtest(
@@ -250,10 +287,15 @@ async def execute_backtest(
 
 @strategy_router.delete(
     "/{strategy_id}",
+    dependencies=[Depends(security)],
     responses={
         200: {
             "model": SuccessResponseSchema[dict],
             "description": "Strategy permanently deleted",
+        },
+        401: {
+            "model": ErrorResponseSchema,
+            "description": "Invalid or missing authentication token",
         },
         404: {
             "model": ErrorResponseSchema,
@@ -275,10 +317,15 @@ async def delete_strategy(
 
 @strategy_router.get(
     "/{strategy_id}/backtests",
+    dependencies=[Depends(security)],
     responses={
         200: {
             "model": SuccessResponseSchema[PaginatedBacktestsResponseSchema],
             "description": "List all paginated backtest runs for a given strategy",
+        },
+        401: {
+            "model": ErrorResponseSchema,
+            "description": "Invalid or missing authentication token",
         },
         404: {
             "model": ErrorResponseSchema,
@@ -291,8 +338,6 @@ async def list_strategy_backtests(
     user: Annotated[dict, Depends(get_current_user)],
     page: int = 1,
     limit: int = 8,
-    exchange: str | None = None,
-    symbol: str | None = None,
     backtest_service: BacktestService = Depends(get_backtest_service)
 ) -> JSONResponse:
     """List historical backtest results for a specific strategy with pagination and filtering."""
@@ -300,18 +345,21 @@ async def list_strategy_backtests(
         user_id=user["user_id"],
         strategy_id=strategy_id,
         page=page,
-        limit=limit,
-        exchange=exchange,
-        symbol=symbol
+        limit=limit
     )
     return BaseResponseHandler.success_response(data=result, status_code=status_code)
 
 @strategy_router.get(
     "/{strategy_id}/backtests/{backtest_id}",
+    dependencies=[Depends(security)],
     responses={
         200: {
             "model": SuccessResponseSchema[BacktestResponseSchema],
             "description": "Successfully retrieved target backtest run with curves intact",
+        },
+        401: {
+            "model": ErrorResponseSchema,
+            "description": "Invalid or missing authentication token",
         },
         404: {
             "model": ErrorResponseSchema,
@@ -335,10 +383,15 @@ async def get_backtest(
 
 @strategy_router.delete(
     "/{strategy_id}/backtests/{backtest_id}",
+    dependencies=[Depends(security)],
     responses={
         200: {
             "model": SuccessResponseSchema[dict],
             "description": "Backtest run deleted successfully",
+        },
+        401: {
+            "model": ErrorResponseSchema,
+            "description": "Invalid or missing authentication token",
         },
         404: {
             "model": ErrorResponseSchema,
@@ -367,9 +420,20 @@ async def delete_backtest(
 
 @strategy_router.post(
     "/{strategy_id}/optimize",
+    dependencies=[Depends(security)],
     responses={
-        202: {"description": "Optimization job enqueued"},
-        404: {"model": ErrorResponseSchema, "description": "Strategy not found"},
+        202: {
+            "model": SuccessResponseSchema[OptimizationTriggerResponseSchema],
+            "description": "Optimization job enqueued"
+        },
+        401: {
+            "model": ErrorResponseSchema,
+            "description": "Invalid or missing authentication token",
+        },
+        404: {
+            "model": ErrorResponseSchema, 
+            "description": "Strategy not found"
+        },
     },
 )
 async def trigger_optimization(
@@ -396,27 +460,49 @@ async def trigger_optimization(
 
 @strategy_router.get(
     "/{strategy_id}/optimizations",
-    responses={200: {"description": "Paginated list of optimization runs"}},
+    dependencies=[Depends(security)],
+    responses={
+        200: {
+            "model": SuccessResponseSchema[PaginatedOptimizationRunsResponseSchema],
+            "description": "Paginated list of optimization runs"
+        },
+        401: {
+            "model": ErrorResponseSchema,
+            "description": "Invalid or missing authentication token",
+        },
+    },
 )
 async def list_optimization_runs(
     strategy_id: str,
     user: Annotated[dict, Depends(get_current_user)],
     page: int = 1,
     limit: int = 8,
+    search: str = "",
     optimization_service: OptimizationService = Depends(get_optimization_service)
 ) -> JSONResponse:
     """List all optimization runs for a strategy with pagination."""
     status_code, result = await optimization_service.list_optimization_runs(
-        user_id=user["user_id"], strategy_id=strategy_id, page=page, limit=limit
+        user_id=user["user_id"], strategy_id=strategy_id, page=page, limit=limit, search=search
     )
     return BaseResponseHandler.success_response(data=result, status_code=status_code)
 
 
 @strategy_router.get(
     "/{strategy_id}/optimizations/{run_id}",
+    dependencies=[Depends(security)],
     responses={
-        200: {"description": "Optimization run details with leaderboard"},
-        404: {"model": ErrorResponseSchema, "description": "Run not found"},
+        200: {
+            "model": SuccessResponseSchema[OptimizationRunResponseSchema],
+            "description": "Optimization run details with leaderboard"
+        },
+        401: {
+            "model": ErrorResponseSchema,
+            "description": "Invalid or missing authentication token",
+        },
+        404: {
+            "model": ErrorResponseSchema, 
+            "description": "Run not found"
+        },
     },
 )
 async def get_optimization_run(
@@ -438,9 +524,20 @@ async def get_optimization_run(
 
 @strategy_router.post(
     "/{strategy_id}/walkforward",
+    dependencies=[Depends(security)],
     responses={
-        202: {"description": "Walk-forward job enqueued"},
-        404: {"model": ErrorResponseSchema, "description": "Strategy not found"},
+        202: {
+            "model": SuccessResponseSchema[WalkForwardTriggerResponseSchema],
+            "description": "Walk-forward job enqueued"
+        },
+        401: {
+            "model": ErrorResponseSchema,
+            "description": "Invalid or missing authentication token",
+        },
+        404: {
+            "model": ErrorResponseSchema, 
+            "description": "Strategy not found"
+        },
     },
 )
 async def trigger_walkforward(
@@ -469,27 +566,49 @@ async def trigger_walkforward(
 
 @strategy_router.get(
     "/{strategy_id}/walkforwards",
-    responses={200: {"description": "Paginated list of walk-forward runs"}},
+    dependencies=[Depends(security)],
+    responses={
+        200: {
+            "model": SuccessResponseSchema[PaginatedWalkForwardRunsResponseSchema],
+            "description": "Paginated list of walk-forward runs"
+        },
+        401: {
+            "model": ErrorResponseSchema,
+            "description": "Invalid or missing authentication token",
+        },
+    },
 )
 async def list_walkforward_runs(
     strategy_id: str,
     user: Annotated[dict, Depends(get_current_user)],
     page: int = 1,
     limit: int = 8,
+    search: str = "",
     walkforward_service: WalkForwardService = Depends(get_walkforward_service)
 ) -> JSONResponse:
     """List all walk-forward runs for a strategy with pagination."""
     status_code, result = await walkforward_service.list_walkforward_runs(
-        user_id=user["user_id"], strategy_id=strategy_id, page=page, limit=limit
+        user_id=user["user_id"], strategy_id=strategy_id, page=page, limit=limit, search=search
     )
     return BaseResponseHandler.success_response(data=result, status_code=status_code)
 
 
 @strategy_router.get(
     "/{strategy_id}/walkforwards/{run_id}",
+    dependencies=[Depends(security)],
     responses={
-        200: {"description": "Walk-forward run details with window summary"},
-        404: {"model": ErrorResponseSchema, "description": "Run not found"},
+        200: {
+            "model": SuccessResponseSchema[WalkForwardRunResponseSchema],
+            "description": "Walk-forward run details with window summary"
+        },
+        401: {
+            "model": ErrorResponseSchema,
+            "description": "Invalid or missing authentication token",
+        },
+        404: {
+            "model": ErrorResponseSchema, 
+            "description": "Run not found"
+        },
     },
 )
 async def get_walkforward_run(
@@ -511,9 +630,20 @@ async def get_walkforward_run(
 
 @strategy_router.post(
     "/{strategy_id}/montecarlo",
+    dependencies=[Depends(security)],
     responses={
-        202: {"description": "Monte Carlo job enqueued"},
-        404: {"model": ErrorResponseSchema, "description": "Strategy or source backtest not found"},
+        202: {
+            "model": SuccessResponseSchema[MonteCarloTriggerResponseSchema],
+            "description": "Monte Carlo job enqueued"
+        },
+        401: {
+            "model": ErrorResponseSchema,
+            "description": "Invalid or missing authentication token",
+        },
+        404: {
+            "model": ErrorResponseSchema, 
+            "description": "Strategy or source backtest not found"
+        },
     },
 )
 async def trigger_montecarlo(
@@ -536,27 +666,49 @@ async def trigger_montecarlo(
 
 @strategy_router.get(
     "/{strategy_id}/montecarlos",
-    responses={200: {"description": "Paginated list of Monte Carlo runs"}},
+    dependencies=[Depends(security)],
+    responses={
+        200: {
+            "model": SuccessResponseSchema[PaginatedMonteCarloRunsResponseSchema],
+            "description": "Paginated list of Monte Carlo runs"
+        },
+        401: {
+            "model": ErrorResponseSchema,
+            "description": "Invalid or missing authentication token",
+        },
+    },
 )
 async def list_montecarlo_runs(
     strategy_id: str,
     user: Annotated[dict, Depends(get_current_user)],
     page: int = 1,
     limit: int = 8,
+    search: str = "",
     montecarlo_service: MonteCarloService = Depends(get_montecarlo_service)
 ) -> JSONResponse:
     """List all Monte Carlo runs for a strategy with pagination."""
     status_code, result = await montecarlo_service.list_montecarlo_runs(
-        user_id=user["user_id"], strategy_id=strategy_id, page=page, limit=limit
+        user_id=user["user_id"], strategy_id=strategy_id, page=page, limit=limit, search=search
     )
     return BaseResponseHandler.success_response(data=result, status_code=status_code)
 
 
 @strategy_router.get(
     "/{strategy_id}/montecarlos/{run_id}",
+    dependencies=[Depends(security)],
     responses={
-        200: {"description": "Monte Carlo run details with probability distributions"},
-        404: {"model": ErrorResponseSchema, "description": "Run not found"},
+        200: {
+            "model": SuccessResponseSchema[MonteCarloRunResponseSchema],
+            "description": "Monte Carlo run details with probability distributions"
+        },
+        401: {
+            "model": ErrorResponseSchema,
+            "description": "Invalid or missing authentication token",
+        },
+        404: {
+            "model": ErrorResponseSchema, 
+            "description": "Run not found"
+        },
     },
 )
 async def get_montecarlo_run(

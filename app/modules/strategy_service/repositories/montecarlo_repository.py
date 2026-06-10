@@ -43,7 +43,7 @@ class MonteCarloRepository(BaseRepository[MonteCarloRun]):
             await self.session.flush()
 
     async def get_runs_paginated(
-        self, strategy_id: str, user_id: str, page: int = 1, limit: int = 8
+        self, strategy_id: str, user_id: str, page: int = 1, limit: int = 8, search: str = ""
     ) -> dict[str, Any]:
         """Paginated list of monte carlo runs for a strategy."""
         offset = (page - 1) * limit
@@ -54,6 +54,11 @@ class MonteCarloRepository(BaseRepository[MonteCarloRun]):
         count_stmt = select(func.count()).select_from(MonteCarloRun).where(
             MonteCarloRun.strategy_id == strategy_id, MonteCarloRun.user_id == user_id
         )
+
+        if search:
+            search_filter = MonteCarloRun.method.ilike(f"%{search}%")
+            base = base.where(search_filter)
+            count_stmt = count_stmt.where(search_filter)
 
         total = (await self.session.execute(count_stmt)).scalar_one()
         items = (await self.session.execute(base.order_by(MonteCarloRun.created_at.desc()).offset(offset).limit(limit))).scalars().all()

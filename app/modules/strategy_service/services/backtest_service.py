@@ -51,31 +51,23 @@ class BacktestService:
             target_symbol = datasources[0].get("symbol", target_symbol)
             target_exchange = datasources[0].get("source", target_exchange)
 
-        # Create PENDING record
         run = Backtest(
             strategy_id=strategy_id,
-            exchange=target_exchange,
-            symbol=target_symbol,
             start_date=start_date,
             end_date=end_date,
             initial_capital=initial_capital,
-            leverage=leverage,
             status="PENDING",
             metrics_json={},
             charting_json={}
         )
         created_run = await self.backtest_repository.create(run)
 
-        # Dispatch Task
         task = run_asynchronous_backtest_task.delay(
             backtest_id=created_run.id,
             strategy_id=strategy_id,
-            exchange=target_exchange,
-            symbol=target_symbol,
             start_date_iso=start_date.isoformat(),
             end_date_iso=end_date.isoformat(),
-            initial_capital=initial_capital,
-            leverage=leverage
+            initial_capital=initial_capital
         )
 
         return 202, {
@@ -93,19 +85,23 @@ class BacktestService:
         if not strategy:
             raise ResourceNotFoundException("Strategy not found")
 
-        paginated_data = await self.backtest_repository.get_paginated_backtests(strategy_id, page, limit)
+        paginated_data = await self.backtest_repository.get_backtests_paginated(
+            strategy_id, page, limit
+        )
 
         backtests_schemas = []
         for bt in paginated_data["backtests"]:
             schema = BacktestResponseSchema.model_validate(bt)
             # Strip heavy charting data from paginated list responses
             if isinstance(schema.charting_json, dict):
-                if "equity_curve" in schema.charting_json:
-                    schema.charting_json["equity_curve"] = []
-                if "drawdown_curve" in schema.charting_json:
-                    schema.charting_json["drawdown_curve"] = []
+                if "datasets" in schema.charting_json:
+                    schema.charting_json["datasets"] = {}
                 if "trades" in schema.charting_json:
-                    schema.charting_json["trades"] = []
+                    schema.charting_json["trades"] = {}
+                if "correlations" in schema.charting_json:
+                    schema.charting_json["correlations"] = {}
+                if "monthly" in schema.charting_json:
+                    schema.charting_json["monthly"] = {}
             # Truncate massive error strings in metrics to prevent frontend hang
             if isinstance(schema.metrics_json, dict) and "error" in schema.metrics_json:
                 err = schema.metrics_json["error"]

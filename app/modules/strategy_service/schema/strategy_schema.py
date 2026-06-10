@@ -22,26 +22,7 @@ class JobStatus(str, Enum):
 # Strategy Schemas
 # ─────────────────────────────────────────────────────────────────────────────
 
-class ConditionExpression(BaseModel):
-    logical_gate: Optional[str] = None
-    leftOperand: str
-    operator: str
-    rightOperand: str
 
-class ConditionNodeDataSchema(BaseModel):
-    expressions: list[ConditionExpression] = []
-
-class ActionSequenceStep(BaseModel):
-    actionType: str
-    side: Optional[str] = None
-    amount: Optional[float] = None
-    sl: Optional[float] = None
-    tp: Optional[float] = None
-    limit_price: Optional[float] = None
-    percentage: Optional[float] = None
-
-class ActionNodeDataSchema(BaseModel):
-    steps: list[ActionSequenceStep] = []
 
 class StrategyCreateSchema(BaseModel):
     name: str
@@ -83,12 +64,9 @@ class BacktestTriggerRequestSchema(BaseModel):
 class BacktestResponseSchema(BaseModel):
     id: str
     strategy_id: str
-    exchange: str
-    symbol: str
     start_date: datetime
     end_date: datetime
     initial_capital: float
-    leverage: int
     status: str
     metrics_json: Optional[Dict[str, Any]] = None
     charting_json: Optional[Dict[str, Any]] = None

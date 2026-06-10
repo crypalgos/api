@@ -90,12 +90,12 @@ class WalkForwardService:
         return 200, WalkForwardRunResponseSchema.model_validate(run)
 
     async def list_walkforward_runs(
-        self, user_id: str, strategy_id: str, page: int = 1, limit: int = 8
+        self, user_id: str, strategy_id: str, page: int = 1, limit: int = 8, search: str = ""
     ) -> tuple[int, PaginatedWalkForwardRunsResponseSchema]:
         """Paginated list of walk-forward runs for a strategy."""
         strategy = await self.strategy_repository.get_by_user_and_id(user_id, strategy_id)
         if not strategy:
             raise ResourceNotFoundException("Strategy not found")
 
-        data = await self.walkforward_repository.get_runs_paginated(strategy_id, user_id, page, limit)
+        data = await self.walkforward_repository.get_runs_paginated(strategy_id, user_id, page, limit, search)
         return 200, PaginatedWalkForwardRunsResponseSchema.model_validate(data)

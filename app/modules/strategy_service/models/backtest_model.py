@@ -29,12 +29,9 @@ class Backtest(Base):
     )
     
     # Backtest configurations
-    exchange: Mapped[str] = mapped_column(String(50), nullable=False)
-    symbol: Mapped[str] = mapped_column(String(50), nullable=False)
     start_date: Mapped[DateTime] = mapped_column(DateTime(timezone=True), nullable=False)
     end_date: Mapped[DateTime] = mapped_column(DateTime(timezone=True), nullable=False)
     initial_capital: Mapped[float] = mapped_column(Float, nullable=False, default=10000.0)
-    leverage: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
     
     # Status tracking (PENDING, RUNNING, COMPLETED, FAILED)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="PENDING")

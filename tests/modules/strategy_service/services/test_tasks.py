@@ -45,15 +45,21 @@ async def test_run_asynchronous_backtest_task_success(
     # 2. Setup Mock EngineSimulator
     mock_simulator = MagicMock()
     mock_report = {
-        "net_profit": 500.0,
-        "win_rate": 0.75,
-        "profit_factor": 2.0,
-        "sharpe_ratio": 2.5,
-        "max_drawdown": 0.02,
-        "final_balance": 10500.0,
-        "trades": [{"id": 1, "symbol": "BTC/USDT", "side": "buy"}],
-        "equity_curve": [[12345678, 10000.0], [12345679, 10500.0]],
-        "drawdown_curve": [[12345678, 0.0], [12345679, 0.0]]
+        "metrics": {
+            "global": {
+                "net_profit": 500.0,
+                "win_rate": 0.75,
+                "profit_factor": 2.0,
+                "sharpe_ratio": 2.5,
+                "max_drawdown_pct": 2.0
+            }
+        },
+        "datasets": {
+            "global_equity_curve": [[12345678, 10000.0], [12345679, 10500.0]]
+        },
+        "trades": {"recent_trades": [{"id": 1, "symbol": "BTC/USDT", "side": "buy"}]},
+        "monthly": {},
+        "correlations": {}
     }
     mock_simulator.run.return_value = mock_report
     mock_simulator_cls.return_value = mock_simulator
@@ -62,19 +68,16 @@ async def test_run_asynchronous_backtest_task_success(
     result = await _execute_backtest_internal(
         backtest_id="test-bt-123",
         strategy_id="strat-123",
-        exchange="binance",
-        symbol="BTC/USDT",
         start_date=datetime(2026, 1, 1),
         end_date=datetime(2026, 1, 2),
-        initial_capital=10000.0,
-        leverage=1
+        initial_capital=10000.0
     )
 
     # 4. Verify outputs and side effects
     assert result["success"] is True
     assert "backtest_id" in result
-    assert result["metrics"]["net_profit"] == 500.0
-    assert result["metrics"]["win_rate"] == 0.75
+    assert result["metrics"]["global"]["net_profit"] == 500.0
+    assert result["metrics"]["global"]["win_rate"] == 0.75
 
     # Verify database calls
     assert mock_session.get.call_count >= 2
@@ -82,7 +85,6 @@ async def test_run_asynchronous_backtest_task_success(
     # Verify simulation params
     mock_simulator_cls.assert_called_once_with(
         initial_capital=10000.0,
-        leverage=1,
         slippage_rate=0.0002,
         maker_fee_rate=0.0002,
         taker_fee_rate=0.0004
@@ -197,12 +199,9 @@ class MaliciousStrategy:
         await _execute_backtest_internal(
             backtest_id="test-bt-123",
             strategy_id="strat-123",
-            exchange="binance",
-            symbol="BTC/USDT",
             start_date=datetime(2026, 1, 1),
             end_date=datetime(2026, 1, 2),
-            initial_capital=10000.0,
-            leverage=1
+            initial_capital=10000.0
         )
     
     assert "Import of 'os' is strictly forbidden." in str(exc_info.value)

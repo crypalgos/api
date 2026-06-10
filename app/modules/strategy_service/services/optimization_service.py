@@ -85,12 +85,12 @@ class OptimizationService:
         return 200, OptimizationRunResponseSchema.model_validate(run)
 
     async def list_optimization_runs(
-        self, user_id: str, strategy_id: str, page: int = 1, limit: int = 8
+        self, user_id: str, strategy_id: str, page: int = 1, limit: int = 8, search: str = ""
     ) -> tuple[int, PaginatedOptimizationRunsResponseSchema]:
         """Paginated list of optimization runs for a strategy."""
         strategy = await self.strategy_repository.get_by_user_and_id(user_id, strategy_id)
         if not strategy:
             raise ResourceNotFoundException("Strategy not found")
 
-        data = await self.optimization_repository.get_runs_paginated(strategy_id, user_id, page, limit)
+        data = await self.optimization_repository.get_runs_paginated(strategy_id, user_id, page, limit, search)
         return 200, PaginatedOptimizationRunsResponseSchema.model_validate(data)

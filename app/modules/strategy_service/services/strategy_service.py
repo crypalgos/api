@@ -53,7 +53,7 @@ class StrategyService:
         strategy.compiled_code = compiled_code
         strategy.updated_at = datetime.utcnow()
         
-        updated_strategy = await self.strategy_repository.update(strategy)
+        updated_strategy = await self.strategy_repository.update(strategy.id)
         return 200, StrategyResponseSchema.model_validate(updated_strategy)
         
     async def get_strategy(self, user_id: str, strategy_id: str) -> tuple[int, StrategyResponseSchema]:
@@ -64,11 +64,50 @@ class StrategyService:
         return 200, StrategyResponseSchema.model_validate(strategy)
 
     async def list_strategies(
-        self, user_id: str, page: int = 1, limit: int = 8
+        self, user_id: str, page: int = 1, limit: int = 8, search: str = ""
     ) -> tuple[int, PaginatedStrategiesResponseSchema]:
         """Retrieve paginated summary list of user strategies."""
-        paginated_data = await self.strategy_repository.get_paginated_strategies(user_id, page, limit)
+        paginated_data = await self.strategy_repository.get_strategies_paginated(user_id, page, limit, search)
         return 200, PaginatedStrategiesResponseSchema.model_validate(paginated_data)
+
+    async def update_canvas(
+        self, user_id: str, strategy_id: str, canvas_json: dict, name: str | None = None, description: str | None = None
+    ) -> tuple[int, StrategyResponseSchema]:
+        """Save visual canvas node/edge graph and recompile to Python strategy code."""
+        strategy = await self.strategy_repository.get_by_user_and_id(user_id, strategy_id)
+        if not strategy:
+            raise ResourceNotFoundException("Strategy not found")
+        
+        compiler = DAGCompiler()
+        compiled_script = compiler.compile_dag(canvas_json)
+
+        strategy.canvas_json = canvas_json
+        strategy.compiled_code = compiled_script
+        strategy.updated_at = datetime.utcnow()
+        if name is not None:
+            strategy.name = name
+        if description is not None:
+            strategy.description = description
+            
+        updated_strategy = await self.strategy_repository.update(strategy.id)
+        return 200, StrategyResponseSchema.model_validate(updated_strategy)
+
+    async def reset_to_visual_builder(
+        self, user_id: str, strategy_id: str
+    ) -> tuple[int, StrategyResponseSchema]:
+        """Reset custom code edits by recompiling from the saved Visual Canvas graph."""
+        strategy = await self.strategy_repository.get_by_user_and_id(user_id, strategy_id)
+        if not strategy:
+            raise ResourceNotFoundException("Strategy not found")
+            
+        compiler = DAGCompiler()
+        compiled_script = compiler.compile_dag(strategy.canvas_json)
+        
+        strategy.compiled_code = compiled_script
+        strategy.updated_at = datetime.utcnow()
+        
+        updated_strategy = await self.strategy_repository.update(strategy.id)
+        return 200, StrategyResponseSchema.model_validate(updated_strategy)
 
     async def delete_strategy(self, user_id: str, strategy_id: str) -> tuple[int, dict]:
         """Delete a given visual strategy entirely including all its compiled artifacts."""

@@ -43,7 +43,7 @@ class WalkForwardRepository(BaseRepository[WalkForwardRun]):
             await self.session.flush()
 
     async def get_runs_paginated(
-        self, strategy_id: str, user_id: str, page: int = 1, limit: int = 8
+        self, strategy_id: str, user_id: str, page: int = 1, limit: int = 8, search: str = ""
     ) -> dict[str, Any]:
         """Paginated list of walk-forward runs for a strategy."""
         offset = (page - 1) * limit
@@ -54,6 +54,11 @@ class WalkForwardRepository(BaseRepository[WalkForwardRun]):
         count_stmt = select(func.count()).select_from(WalkForwardRun).where(
             WalkForwardRun.strategy_id == strategy_id, WalkForwardRun.user_id == user_id
         )
+
+        if search:
+            search_filter = WalkForwardRun.objective.ilike(f"%{search}%")
+            base = base.where(search_filter)
+            count_stmt = count_stmt.where(search_filter)
 
         total = (await self.session.execute(count_stmt)).scalar_one()
         items = (await self.session.execute(base.order_by(WalkForwardRun.created_at.desc()).offset(offset).limit(limit))).scalars().all()

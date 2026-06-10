@@ -15,12 +15,15 @@ services:
     environment:
       - APP_ENV=development
       - DEBUG=true
+      - PYTHONPATH=/crypalgos_core:/crypalgos-data
       - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-crypalgos}
       - PYTHONUNBUFFERED=1
     env_file:
       - .env.dev
     volumes:
       - .:/app
+      - ../crypalgos_core:/crypalgos_core
+      - ../crypalgos-data:/crypalgos-data
     depends_on:
       db:
         condition: service_healthy
