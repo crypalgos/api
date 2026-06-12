@@ -8,10 +8,10 @@ from sqlalchemy.sql import func
 from app.config.base import Base
 
 if TYPE_CHECKING:
-    from app.modules.strategy_service.models.backtest_model import Backtest
-    from app.modules.strategy_service.models.optimization_model import OptimizationRun
-    from app.modules.strategy_service.models.walkforward_model import WalkForwardRun
-    from app.modules.strategy_service.models.montecarlo_model import MonteCarloRun
+    from app.modules.strategy_service.models.research_run_model import (
+        ResearchRun,
+        StrategyLatestResults,
+    )
 
 
 class Strategy(Base):
@@ -42,6 +42,9 @@ class Strategy(Base):
     # State tracking if the user has customized the code in the editor, bypassing automatic canvas compilations
     is_code_modified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
+    is_template: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    is_archived: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
     created_at: Mapped[DateTime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -53,15 +56,9 @@ class Strategy(Base):
     )
 
     # Relationships
-    backtests: Mapped[List["Backtest"]] = relationship(
-        "Backtest", back_populates="strategy", cascade="all, delete-orphan"
+    research_runs: Mapped[List["ResearchRun"]] = relationship(
+        "ResearchRun", back_populates="strategy", cascade="all, delete-orphan"
     )
-    optimization_runs: Mapped[List["OptimizationRun"]] = relationship(
-        "OptimizationRun", back_populates="strategy", cascade="all, delete-orphan"
-    )
-    walkforward_runs: Mapped[List["WalkForwardRun"]] = relationship(
-        "WalkForwardRun", back_populates="strategy", cascade="all, delete-orphan"
-    )
-    montecarlo_runs: Mapped[List["MonteCarloRun"]] = relationship(
-        "MonteCarloRun", back_populates="strategy", cascade="all, delete-orphan"
+    latest_results: Mapped["StrategyLatestResults"] = relationship(
+        "StrategyLatestResults", back_populates="strategy", cascade="all, delete-orphan", uselist=False
     )

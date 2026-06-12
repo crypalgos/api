@@ -1,4 +1,5 @@
 from typing import Any
+
 from fastapi import Request
 from fastapi.security import HTTPBearer
 
@@ -53,6 +54,7 @@ security = HTTPBearer()
 
 
 from fastapi import Depends
+
 
 async def get_admin_user(current_user: dict = Depends(get_current_user)) -> dict:
     """Dependency to check if the current user is an admin (ashishjangde54@gmail.com)"""

@@ -3,11 +3,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.responses import RedirectResponse
 
 from app.advices.global_exception_handler import GlobalExceptionHandler
+from app.modules.strategy_service.routes.strategy_routes import strategy_router
 from app.modules.user_service.routes.auth_routes import auth_router
+from app.modules.user_service.routes.contact_routes import contact_router
 from app.modules.user_service.routes.session_routes import session_router
 from app.modules.user_service.routes.user_routes import user_router
-from app.modules.user_service.routes.contact_routes import contact_router
-from app.modules.strategy_service.routes.strategy_routes import strategy_router
 
 app = FastAPI(
     title="CrypAlgos Api Docs",
@@ -39,12 +39,16 @@ async def health_check() -> dict[str, str]:
     return {"status": "healthy", "message": "API is running"}
 
 
-from crypalgos_core.compiler.registry import INDICATOR_REGISTRY, BROKER_REGISTRY
-from crypalgos_core.database import get_clickhouse_client, TIMEFRAME_TO_CLICKHOUSE_INTERVAL
-import time
 import copy
-from typing import Dict, Any
 import logging
+import time
+from typing import Any, Dict
+
+from crypalgos_core.compiler.registry import BROKER_REGISTRY, INDICATOR_REGISTRY
+from crypalgos_core.database import (
+    TIMEFRAME_TO_CLICKHOUSE_INTERVAL,
+    get_clickhouse_client,
+)
 
 _CONFIG_CACHE: Dict[str, Any] = {"timestamp": 0, "data": None}
 CACHE_TTL = 300  # 5 minutes
@@ -126,4 +130,5 @@ app.include_router(strategy_router, prefix="/api/v1")
 
 # Setup Data Service
 from app.modules.data_service.manager import setup_data_service
+
 setup_data_service(app)

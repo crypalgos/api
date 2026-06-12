@@ -4,13 +4,19 @@ from datetime import datetime
 from typing import Any
 
 from crypalgos_core.montecarlo import (
-    MonteCarloEngine, MonteCarloJob, MonteCarloMethod, build_montecarlo_report,
+    MonteCarloEngine,
+    MonteCarloJob,
+    MonteCarloMethod,
+    build_montecarlo_report,
 )
 
 from app.celery_app import celery_app
 from app.db.connect_db import AsyncSessionLocal
-from app.modules.strategy_service.models.backtest_model import Backtest
-from app.modules.strategy_service.models.montecarlo_model import MonteCarloRun
+from app.modules.strategy_service.models.research_run_model import (
+    ResearchRun,
+    StrategyLatestResults,
+)
+from app.modules.strategy_service.services.storage_service import storage_service
 from app.modules.strategy_service.tasks.task_utils import job_lifecycle_context
 
 logger = logging.getLogger(__name__)
@@ -23,37 +29,88 @@ async def _execute_montecarlo_internal(
     method: str,
     random_seed: int | None,
 ) -> dict[str, Any]:
-    """Execute Monte Carlo simulation on existing backtest trades and persist results."""
-    async with job_lifecycle_context(MonteCarloRun, run_id, "Monte Carlo task"):
-        # Fetch the source backtest
+    async with job_lifecycle_context(run_id, "Monte Carlo task"):
+        # Fetch the source backtest (read from its S3 report payload instead of database column)
         async with AsyncSessionLocal() as session:
-            backtest = await session.get(Backtest, source_backtest_id)
-            if not backtest:
+            backtest_run = await session.get(ResearchRun, source_backtest_id)
+            if not backtest_run:
                 raise ValueError(f"Source backtest {source_backtest_id} not found.")
-            backtest_report = backtest.charting_json
+            backtest_report_key = backtest_run.report_s3_key
+            if not backtest_report_key:
+                raise ValueError(f"Source backtest {source_backtest_id} report payload not found in storage.")
+            
+            backtest_payload = await storage_service.download_payload(backtest_report_key)
+            backtest_report = backtest_payload.get("charting", {})
 
         mc_method = MonteCarloMethod(method)
         job = MonteCarloJob(
             simulation_count=simulation_count,
             method=mc_method,
             random_seed=random_seed,
+            ruin_threshold_pct=0.20,
         )
 
+        class MockResearchResult:
+            def __init__(self, trades):
+                self.trades = trades
+                
+        trades = backtest_report.get("trades", {}).get("recent_trades", [])
+        if not trades:
+            raise ValueError("Source backtest has no valid trades to run Monte Carlo.")
+            
+        research_result = MockResearchResult(trades)
+
         mc_engine = MonteCarloEngine()
-        result = mc_engine.run(job, backtest_report=backtest_report)
+        result = mc_engine.run(job, research_result=research_result)
         report = build_montecarlo_report(result)
+
+        # S3-First storage uploads
+        meta_payload = {
+            "strategy_id": strategy_id,
+            "run_id": run_id,
+            "source_backtest_id": source_backtest_id,
+            "simulation_count": simulation_count,
+            "method": method,
+            "random_seed": random_seed,
+        }
+        report_payload = {
+            "report": report,
+            "simulation_count": simulation_count,
+        }
+
+        metadata_key = f"reports/{strategy_id}/runs/{run_id}/metadata.msgpack.zstd"
+        report_key = f"reports/{strategy_id}/runs/{run_id}/report.msgpack.zstd"
+        latest_key = f"reports/{strategy_id}/latest/montecarlo.msgpack.zstd"
+
+        await storage_service.upload_payload(metadata_key, meta_payload)
+        await storage_service.upload_payload(report_key, report_payload)
+        await storage_service.upload_payload(latest_key, report_payload)
+
+        # Build database summary (extract percentile/metrics from Monte Carlo report)
+        summary_json = {
+            "median_drawdown": report.get("drawdown_distribution", {}).get("median"),
+            "worst_drawdown": report.get("drawdown_distribution", {}).get("worst"),
+            "probability_of_ruin": report.get("probability_of_ruin", 0.0),
+        }
 
         # Update DB
         async with AsyncSessionLocal() as session:
             async with session.begin():
-                run = await session.get(MonteCarloRun, run_id)
-                run.status = "COMPLETED"
-                run.completed_at = datetime.utcnow()
-                run.summary_json = report
-                run.progress_json = {
-                    "completed_simulations": simulation_count,
-                    "total_simulations": simulation_count
-                }
+                run = await session.get(ResearchRun, run_id)
+                if run:
+                    run.status = "COMPLETED"
+                    run.completed_at = datetime.utcnow()
+                    run.progress_percent = 100
+                    run.metadata_s3_key = metadata_key
+                    run.report_s3_key = report_key
+                    run.summary_json = summary_json
+
+                # Register latest montecarlo mapping
+                latest = await session.get(StrategyLatestResults, strategy_id)
+                if not latest:
+                    latest = StrategyLatestResults(strategy_id=strategy_id)
+                    session.add(latest)
+                latest.latest_montecarlo_id = run_id
 
         logger.info(f"Monte Carlo run {run_id} completed.")
         return {"success": True, "run_id": run_id}

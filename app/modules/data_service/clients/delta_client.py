@@ -1,5 +1,6 @@
 from .base_client import BaseExchangeClient
 
+
 class DeltaExchangeClient(BaseExchangeClient):
     def __init__(self, broker, symbols=["BTCUSD", "ETHUSD"]):
         URL = "wss://socket.india.delta.exchange"

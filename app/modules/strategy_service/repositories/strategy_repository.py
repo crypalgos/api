@@ -1,7 +1,7 @@
 import logging
 from typing import Any
 
-from sqlalchemy import select, or_, func
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config.base_repositories import BaseRepository

@@ -4,18 +4,29 @@ from datetime import datetime
 from typing import Any
 
 from crypalgos_core.optimization import (
-    OptimizationIR, ParameterDefinition, Objective, Constraint,
+    Constraint,
+    Objective,
+    OptimizationIR,
+    ParameterDefinition,
 )
 from crypalgos_core.walkforward import (
-    WalkForwardEngine, WalkForwardJob, validate_walk_forward_job,
+    WalkForwardEngine,
+    WalkForwardJob,
     build_full_report,
+    validate_walk_forward_job,
 )
 
 from app.celery_app import celery_app
 from app.db.connect_db import AsyncSessionLocal
-from app.modules.strategy_service.models.walkforward_model import WalkForwardRun
+from app.modules.strategy_service.models.research_run_model import (
+    ResearchRun,
+    StrategyLatestResults,
+)
+from app.modules.strategy_service.services.storage_service import storage_service
 from app.modules.strategy_service.tasks.task_utils import (
-    job_lifecycle_context, load_and_compile_strategy, AsyncProgressFlusher
+    AsyncProgressFlusher,
+    job_lifecycle_context,
+    load_and_compile_strategy,
 )
 
 logger = logging.getLogger(__name__)
@@ -29,8 +40,7 @@ async def _execute_walkforward_internal(
     window_config_json: dict,
     objective: str,
 ) -> dict[str, Any]:
-    """Execute walk-forward validation engine and persist results."""
-    async with job_lifecycle_context(WalkForwardRun, run_id, "Walk-forward task"):
+    async with job_lifecycle_context(run_id, "Walk-forward task"):
         # Load and compile strategy
         async with AsyncSessionLocal() as session:
             strat_class = await load_and_compile_strategy(strategy_id, session)
@@ -41,7 +51,7 @@ async def _execute_walkforward_internal(
         opt_ir = OptimizationIR(
             parameters=[ParameterDefinition(**p) for p in parameter_space_json],
             constraints=[Constraint(**c) for c in constraints_json],
-            objectives=[Objective(metric=objective, target="maximize")],
+            objectives=[Objective(metric=objective, target="max")],
             search_type=window_config_json.get("search_type", "grid"),
             max_iterations=window_config_json.get("max_runs", 500),
         )
@@ -56,12 +66,12 @@ async def _execute_walkforward_internal(
             data_start=start_date,
             data_end=end_date,
             initial_capital=initial_capital,
-            leverage=next(iter(getattr(strat_class, "datasources", {}).values()), {}).get("leverage", 1),
+            leverage=next(iter(getattr(strat_class, "datasources", {}).values()), {}).get("leverage", 1),  # type: ignore[call-overload]
         )
         validate_walk_forward_job(job)
 
         # Setup progress flusher
-        flusher = AsyncProgressFlusher(WalkForwardRun, run_id)
+        flusher = AsyncProgressFlusher(run_id, "WALKFORWARD")
         flusher_task = asyncio.create_task(flusher.start_polling())
 
         wf_engine = WalkForwardEngine()
@@ -72,17 +82,59 @@ async def _execute_walkforward_internal(
             await flusher_task
         report = build_full_report(result)
 
+        # S3-First storage uploads
+        meta_payload = {
+            "strategy_id": strategy_id,
+            "run_id": run_id,
+            "start_date": start_date.isoformat(),
+            "end_date": end_date.isoformat(),
+            "initial_capital": initial_capital,
+            "window_config": window_config_json,
+            "objective": objective,
+        }
+        report_payload = {
+            "report": report,
+            "windows_count": len(result.windows),
+        }
+
+        metadata_key = f"reports/{strategy_id}/runs/{run_id}/metadata.msgpack.zstd"
+        report_key = f"reports/{strategy_id}/runs/{run_id}/report.msgpack.zstd"
+        latest_key = f"reports/{strategy_id}/latest/walkforward.msgpack.zstd"
+
+        await storage_service.upload_payload(metadata_key, meta_payload)
+        await storage_service.upload_payload(report_key, report_payload)
+        await storage_service.upload_payload(latest_key, report_payload)
+
+        # Build database summary (extract validation metrics from the walkforward report)
+        validation_metrics = report.get("validation_metrics", {})
+        summary_json = {
+            "net_profit": validation_metrics.get("net_profit", 0.0),
+            "total_return_pct": validation_metrics.get("total_return_pct", 0.0),
+            "sharpe_ratio": validation_metrics.get("sharpe_ratio"),
+            "sortino_ratio": validation_metrics.get("sortino_ratio"),
+            "calmar_ratio": validation_metrics.get("calmar_ratio"),
+            "max_drawdown_pct": validation_metrics.get("max_drawdown_pct", 0.0),
+            "trade_count": validation_metrics.get("trade_count", 0),
+        }
+
         # Update DB
         async with AsyncSessionLocal() as session:
             async with session.begin():
-                run = await session.get(WalkForwardRun, run_id)
-                run.status = "COMPLETED"
-                run.completed_at = datetime.utcnow()
-                run.summary_json = report
-                run.progress_json = {
-                    "completed_windows": len(result.windows),
-                    "total_windows": len(result.windows)
-                }
+                run = await session.get(ResearchRun, run_id)
+                if run:
+                    run.status = "COMPLETED"
+                    run.completed_at = datetime.utcnow()
+                    run.progress_percent = 100
+                    run.metadata_s3_key = metadata_key
+                    run.report_s3_key = report_key
+                    run.summary_json = summary_json
+
+                # Register latest walkforward mapping
+                latest = await session.get(StrategyLatestResults, strategy_id)
+                if not latest:
+                    latest = StrategyLatestResults(strategy_id=strategy_id)
+                    session.add(latest)
+                latest.latest_walkforward_id = run_id
 
         logger.info(f"Walk-forward run {run_id} completed with {len(result.windows)} windows.")
         return {"success": True, "run_id": run_id, "windows": len(result.windows)}

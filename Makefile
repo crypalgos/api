@@ -38,5 +38,8 @@ migrate-create:
 migrate-up:
 	uv run alembic upgrade head
 
+migrate-prod-up:
+	ENV_FILE=.env.prod uv run alembic upgrade head
+
 migrate-down:
 	uv run alembic downgrade -1

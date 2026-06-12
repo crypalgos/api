@@ -1,7 +1,8 @@
 import asyncio
 import logging
-from .broker import ZMQBroker
+
 from ..clients.delta_client import DeltaExchangeClient
+from .broker import ZMQBroker
 
 logger = logging.getLogger(__name__)
 

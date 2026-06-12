@@ -1,23 +1,25 @@
 import asyncio
 import logging
-import os
-import tempfile
-import importlib.util
 from datetime import datetime
 from typing import Any
 
 from crypalgos_core.runtime.simulator import EngineSimulator
-from crypalgos_core.runtime.strategy_base import StrategyBase
 
 from app.celery_app import celery_app
 from app.config.settings import settings
 from app.db.connect_db import AsyncSessionLocal
-from app.modules.strategy_service.models.backtest_model import Backtest
-from app.modules.strategy_service.models.strategy_model import Strategy
-from app.modules.strategy_service.tasks.task_utils import (
-    job_lifecycle_context, load_and_compile_strategy, AsyncProgressFlusher
+from app.modules.strategy_service.models.research_run_model import (
+    ResearchRun,
+    StrategyLatestResults,
 )
+from app.modules.strategy_service.models.strategy_model import Strategy
+from app.modules.strategy_service.services.storage_service import storage_service
 from app.modules.strategy_service.tasks.sandbox import run_in_sandbox
+from app.modules.strategy_service.tasks.task_utils import (
+    AsyncProgressFlusher,
+    job_lifecycle_context,
+    load_and_compile_strategy,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -25,18 +27,16 @@ async def _execute_backtest_internal(
     backtest_id: str, strategy_id: str,
     start_date: datetime, end_date: datetime, initial_capital: float
 ) -> dict[str, Any]:
-    # Normalize inputs
-    async with job_lifecycle_context(Backtest, backtest_id, "Backtest task"):
+    async with job_lifecycle_context(backtest_id, "Backtest task"):
         # Load strategy and determine execution mode
         async with AsyncSessionLocal() as session:
             strategy = await session.get(Strategy, strategy_id)
             if not strategy:
-                raise ValueError(f"Strategy {strategy_id} not found in database.")
+                raise ValueError(f"Strategy {strategy_id} not found.")
             
         USE_SANDBOX = settings.sandbox_enabled
 
         if not USE_SANDBOX:
-            # ── In-process execution (local dev / testing) ─────────────────────
             logger.info(f"[DEV] Running backtest in-process for strategy {strategy_id}")
             async with AsyncSessionLocal() as session:
                 strat_class = await load_and_compile_strategy(strategy_id, session)
@@ -49,7 +49,7 @@ async def _execute_backtest_internal(
             )
             
             # Setup progress flusher
-            flusher = AsyncProgressFlusher(Backtest, backtest_id)
+            flusher = AsyncProgressFlusher(backtest_id, "BACKTEST")
             flusher_task = asyncio.create_task(flusher.start_polling())
             
             try:
@@ -64,9 +64,7 @@ async def _execute_backtest_internal(
                 flusher.stop()
                 await flusher_task
         else:
-            # ── Secure Docker gVisor Sandbox Execution ─────────────────────────
-            # Currently does not support real-time progress callbacks across container boundary
-            report = await asyncio.to_thread(
+            report = await asyncio.to_thread(  # type: ignore
                 run_in_sandbox,
                 strategy=strategy,
                 start_date=start_date,
@@ -74,10 +72,9 @@ async def _execute_backtest_internal(
                 initial_capital=initial_capital
             )
 
-        # 6. Map reporting sections to database columns
-        # The new multi-symbol reporting engine returns a structured dictionary
-        metrics = report.get("metrics", {})
-        
+        raw_metrics = report.get("metrics", {})
+        g_metrics = raw_metrics.get("global", raw_metrics.get("global_metrics", raw_metrics))
+
         charting = {
             "datasets": report.get("datasets", {}),
             "trades": report.get("trades", {}),
@@ -85,17 +82,80 @@ async def _execute_backtest_internal(
             "correlations": report.get("correlations", {})
         }
 
+        # S3-First storage uploads
+        meta_payload = {
+            "start_date": start_date.isoformat(),
+            "end_date": end_date.isoformat(),
+            "initial_capital": initial_capital,
+            "strategy_id": strategy_id,
+            "run_id": backtest_id,
+        }
+        report_payload = {
+            "metrics": raw_metrics,
+            "charting": charting,
+        }
+        dataset_payload = {
+            "recent_trades": report.get("trades", {}).get("recent_trades", []),
+            "equity_curve": report.get("datasets", {}).get("equity_curve", []),
+        }
+
+        metadata_key = f"reports/{strategy_id}/runs/{backtest_id}/metadata.msgpack.zstd"
+        report_key = f"reports/{strategy_id}/runs/{backtest_id}/report.msgpack.zstd"
+        dataset_key = f"reports/{strategy_id}/runs/{backtest_id}/datasets.arrow.zstd"
+        latest_key = f"reports/{strategy_id}/latest/backtest.msgpack.zstd"
+
+        await storage_service.upload_payload(metadata_key, meta_payload)
+        await storage_service.upload_payload(report_key, report_payload)
+        await storage_service.upload_payload(dataset_key, dataset_payload)
+        await storage_service.upload_payload(latest_key, report_payload)
+
+        # Build clean summary json for database index
+        total_trades = g_metrics.get("total_trades", g_metrics.get("trade_count", 0))
+        net_profit = g_metrics.get("net_profit", 0.0)
+
+        expectancy = g_metrics.get("expectancy")
+        if expectancy is None:
+            expectancy = raw_metrics.get("distributions", {}).get("global", {}).get("expectancy")
+
+        average_trade = g_metrics.get("average_trade")
+        if average_trade is None:
+            average_trade = net_profit / total_trades if total_trades > 0 else 0.0
+
+        summary_json = {
+            "net_profit": net_profit,
+            "total_return_pct": g_metrics.get("total_return_pct", 0.0),
+            "sharpe_ratio": g_metrics.get("sharpe_ratio"),
+            "sortino_ratio": g_metrics.get("sortino_ratio"),
+            "calmar_ratio": g_metrics.get("calmar_ratio"),
+            "max_drawdown_pct": g_metrics.get("max_drawdown_pct", 0.0),
+            "trade_count": total_trades,
+            "win_rate": g_metrics.get("win_rate", 0.0),
+            "expectancy": expectancy,
+            "average_trade": average_trade,
+        }
+
         # Update DB with results
         async with AsyncSessionLocal() as session:
             async with session.begin():
-                bt = await session.get(Backtest, backtest_id)
-                bt.status = "COMPLETED"
-                bt.completed_at = datetime.utcnow()
-                bt.metrics_json = metrics
-                bt.charting_json = charting
+                run = await session.get(ResearchRun, backtest_id)
+                if run:
+                    run.status = "COMPLETED"
+                    run.completed_at = datetime.utcnow()
+                    run.progress_percent = 100
+                    run.metadata_s3_key = metadata_key
+                    run.report_s3_key = report_key
+                    run.dataset_s3_key = dataset_key
+                    run.summary_json = summary_json
 
-        logger.info(f"Asynchronous Celery backtest run successfully saved: {backtest_id}")
-        return {"success": True, "backtest_id": backtest_id, "metrics": metrics}
+                # Register/update latest backtest mapping
+                latest = await session.get(StrategyLatestResults, strategy_id)
+                if not latest:
+                    latest = StrategyLatestResults(strategy_id=strategy_id)
+                    session.add(latest)
+                latest.latest_backtest_id = backtest_id
+
+        logger.info(f"Asynchronous Celery backtest run successfully completed and saved: {backtest_id}")
+        return {"success": True, "backtest_id": backtest_id, "summary": summary_json}
 
 @celery_app.task(name="app.modules.strategy_service.tasks.run_asynchronous_backtest_task")
 def run_asynchronous_backtest_task(

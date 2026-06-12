@@ -1,8 +1,8 @@
 import os
 from typing import Final
 
-from pydantic_settings import BaseSettings
 from dotenv import load_dotenv
+from pydantic_settings import BaseSettings
 
 
 def _resolve_env_file() -> str:
@@ -60,6 +60,10 @@ class Settings(BaseSettings):
     google_client_id: str = ""
     google_client_secret: str = ""
     sandbox_enabled: bool = False  # Set SANDBOX_ENABLED=true in .env.prod for Docker gVisor path
+    s3_bucket_name: str = ""
+    aws_access_key_id: str = ""
+    aws_secret_access_key: str = ""
+    aws_default_region: str = "us-east-1"
 
     class Config:
         # computed once at import-time; can be overridden by setting ENV_FILE

@@ -1,4 +1,5 @@
 import os
+
 from celery import Celery
 
 # Redis endpoint defaults to localhost for host development, can be configured via environment

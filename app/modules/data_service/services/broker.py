@@ -1,7 +1,7 @@
+import logging
+
 import zmq
 import zmq.asyncio
-import logging
-import asyncio
 
 logger = logging.getLogger(__name__)
 

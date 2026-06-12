@@ -1,6 +1,8 @@
-from fastapi import FastAPI
-from .services.streamer import streamer_manager
 import logging
+
+from fastapi import FastAPI
+
+from .services.streamer import streamer_manager
 
 logger = logging.getLogger(__name__)
 

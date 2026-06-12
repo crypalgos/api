@@ -3,12 +3,10 @@ import logging
 import os
 import shutil
 import subprocess
-import tempfile
 import uuid
 from datetime import datetime
 from typing import Any
 
-from app.config.settings import settings
 from app.modules.strategy_service.models.strategy_model import Strategy
 
 logger = logging.getLogger(__name__)

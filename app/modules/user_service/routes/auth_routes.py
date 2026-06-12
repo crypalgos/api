@@ -609,10 +609,14 @@ async def logout_user(
 
 
 from fastapi.security import HTTPBearer
-from app.modules.user_service.repositories.waitlist_repository import WaitlistRepository
-from app.modules.user_service.services.waitlist_service import WaitlistService
-from app.modules.user_service.schema.waitlist_schema import WaitlistSignupSchema, WaitlistResponseSchema
+
 from app.middlewares.auth_middleware import get_admin_user
+from app.modules.user_service.repositories.waitlist_repository import WaitlistRepository
+from app.modules.user_service.schema.waitlist_schema import (
+    WaitlistResponseSchema,
+    WaitlistSignupSchema,
+)
+from app.modules.user_service.services.waitlist_service import WaitlistService
 
 bearer_security = HTTPBearer()
 

@@ -1,8 +1,12 @@
 import logging
+
 from app.exceptions.exceptions import ResourceNotFoundException
 from app.modules.user_service.models.contact_model import ContactMessage
 from app.modules.user_service.repositories.contact_repository import ContactRepository
-from app.modules.user_service.schema.contact_schema import ContactCreateSchema, ContactResponseSchema
+from app.modules.user_service.schema.contact_schema import (
+    ContactCreateSchema,
+    ContactResponseSchema,
+)
 from app.modules.user_service.schema.user_schema import GenericMessageSchema
 
 logger = logging.getLogger(__name__)

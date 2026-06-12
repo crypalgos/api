@@ -1,7 +1,7 @@
-import requests
-import json
 import time
-from datetime import datetime, timezone
+
+import requests
+
 
 def main():
     base_url = "http://localhost:8000/api/v1"

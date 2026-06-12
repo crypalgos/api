@@ -4,16 +4,27 @@ from datetime import datetime
 from typing import Any
 
 from crypalgos_core.optimization import (
-    OptimizationEngine, OptimizationJob, OptimizationIR,
-    ParameterDefinition, Objective, Constraint,
-    validate_opt_ir, build_leaderboard,
+    Constraint,
+    Objective,
+    OptimizationEngine,
+    OptimizationIR,
+    OptimizationJob,
+    ParameterDefinition,
+    build_leaderboard,
+    validate_opt_ir,
 )
 
 from app.celery_app import celery_app
 from app.db.connect_db import AsyncSessionLocal
-from app.modules.strategy_service.models.optimization_model import OptimizationRun
+from app.modules.strategy_service.models.research_run_model import (
+    ResearchRun,
+    StrategyLatestResults,
+)
+from app.modules.strategy_service.services.storage_service import storage_service
 from app.modules.strategy_service.tasks.task_utils import (
-    job_lifecycle_context, load_and_compile_strategy, AsyncProgressFlusher
+    AsyncProgressFlusher,
+    job_lifecycle_context,
+    load_and_compile_strategy,
 )
 
 logger = logging.getLogger(__name__)
@@ -30,8 +41,7 @@ async def _execute_optimization_internal(
     search_type: str,
     max_runs: int,
 ) -> dict[str, Any]:
-    """Execute optimization engine and persist results to the database."""
-    async with job_lifecycle_context(OptimizationRun, run_id, "Optimization task"):
+    async with job_lifecycle_context(run_id, "Optimization task"):
         # Load and compile strategy
         async with AsyncSessionLocal() as session:
             strat_class = await load_and_compile_strategy(strategy_id, session)
@@ -42,7 +52,7 @@ async def _execute_optimization_internal(
         opt_ir = OptimizationIR(
             parameters=params,
             constraints=constraints,
-            objectives=[Objective(metric=objective, target="maximize")],
+            objectives=[Objective(metric=objective, target="max")],
             search_type=search_type,
             max_iterations=max_runs,
         )
@@ -54,17 +64,17 @@ async def _execute_optimization_internal(
             start_date=start_date,
             end_date=end_date,
             exchange=getattr(strat_class, "exchange", "delta"),
-            symbol=next(iter(getattr(strat_class, "datasources", {}).values()), {}).get("symbol", "BTCUSD"),
+            symbol=next(iter(getattr(strat_class, "datasources", {}).values()), {}).get("symbol", "BTCUSD"),  # type: ignore[call-overload]
             opt_ir=opt_ir,
             initial_capital=initial_capital,
-            leverage=next(iter(getattr(strat_class, "datasources", {}).values()), {}).get("leverage", 1),
+            leverage=next(iter(getattr(strat_class, "datasources", {}).values()), {}).get("leverage", 1),  # type: ignore[call-overload]
         )
 
         # Setup progress flusher
-        flusher = AsyncProgressFlusher(OptimizationRun, run_id)
+        flusher = AsyncProgressFlusher(run_id, "OPTIMIZATION")
         flusher_task = asyncio.create_task(flusher.start_polling())
 
-        # Run Engine in background thread so it doesn't block asyncio flusher
+        # Run Engine in background thread
         engine_opt = OptimizationEngine()
         try:
             opt_run = await asyncio.to_thread(engine_opt.run, job, flusher.update)
@@ -75,15 +85,63 @@ async def _execute_optimization_internal(
         leaderboard = build_leaderboard(opt_run.results, top_n=50)
         best = opt_run.results[0] if opt_run.results else None
 
+        # Build storage payloads
+        meta_payload = {
+            "strategy_id": strategy_id,
+            "run_id": run_id,
+            "start_date": start_date.isoformat(),
+            "end_date": end_date.isoformat(),
+            "initial_capital": initial_capital,
+            "parameter_space": parameter_space_json,
+            "constraints": constraints_json,
+            "search_type": search_type,
+            "objective": objective,
+            "max_runs": max_runs,
+        }
+        report_payload = {
+            "leaderboard": leaderboard,
+            "best_result": {"params": best.params, "metrics": best.metrics, "rank": best.rank} if best else None,
+            "total_runs": len(opt_run.results)
+        }
+
+        metadata_key = f"reports/{strategy_id}/runs/{run_id}/metadata.msgpack.zstd"
+        report_key = f"reports/{strategy_id}/runs/{run_id}/report.msgpack.zstd"
+        latest_key = f"reports/{strategy_id}/latest/optimization.msgpack.zstd"
+
+        await storage_service.upload_payload(metadata_key, meta_payload)
+        await storage_service.upload_payload(report_key, report_payload)
+        await storage_service.upload_payload(latest_key, report_payload)
+
+        # Build database summary (take primary objectives from the best result if it exists)
+        best_metrics = best.metrics if best else {}
+        summary_json = {
+            "net_profit": best_metrics.get("net_profit", 0.0),
+            "total_return_pct": best_metrics.get("total_return_pct", 0.0),
+            "sharpe_ratio": best_metrics.get("sharpe_ratio"),
+            "sortino_ratio": best_metrics.get("sortino_ratio"),
+            "calmar_ratio": best_metrics.get("calmar_ratio"),
+            "max_drawdown_pct": best_metrics.get("max_drawdown_pct", 0.0),
+            "trade_count": best_metrics.get("trade_count", 0),
+        }
+
         # Update DB
         async with AsyncSessionLocal() as session:
             async with session.begin():
-                run = await session.get(OptimizationRun, run_id)
-                run.status = "COMPLETED"
-                run.completed_at = datetime.utcnow()
-                run.best_result_json = {"params": best.params, "metrics": best.metrics, "rank": best.rank} if best else None
-                run.leaderboard_json = leaderboard
-                run.progress_json = {"completed_runs": len(opt_run.results), "total_runs": max_runs}
+                run = await session.get(ResearchRun, run_id)
+                if run:
+                    run.status = "COMPLETED"
+                    run.completed_at = datetime.utcnow()
+                    run.progress_percent = 100
+                    run.metadata_s3_key = metadata_key
+                    run.report_s3_key = report_key
+                    run.summary_json = summary_json
+
+                # Register latest optimization mapping
+                latest = await session.get(StrategyLatestResults, strategy_id)
+                if not latest:
+                    latest = StrategyLatestResults(strategy_id=strategy_id)
+                    session.add(latest)
+                latest.latest_optimization_id = run_id
 
         logger.info(f"Optimization run {run_id} completed with {len(opt_run.results)} results.")
         return {"success": True, "run_id": run_id, "total_results": len(opt_run.results)}

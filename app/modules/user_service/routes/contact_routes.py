@@ -1,6 +1,6 @@
 import logging
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,7 +10,10 @@ from app.advices.responses import ErrorResponseSchema, SuccessResponseSchema
 from app.db.connect_db import get_db
 from app.middlewares.auth_middleware import get_admin_user
 from app.modules.user_service.repositories.contact_repository import ContactRepository
-from app.modules.user_service.schema.contact_schema import ContactCreateSchema, ContactResponseSchema
+from app.modules.user_service.schema.contact_schema import (
+    ContactCreateSchema,
+    ContactResponseSchema,
+)
 from app.modules.user_service.schema.user_schema import GenericMessageSchema
 from app.modules.user_service.services.contact_service import ContactService
 

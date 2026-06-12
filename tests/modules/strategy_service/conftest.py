@@ -10,9 +10,9 @@ from app.main import app
 from app.middlewares.auth_middleware import get_current_user
 from app.modules.strategy_service.routes.strategy_routes import get_strategy_service
 from app.modules.strategy_service.models.strategy_model import Strategy
-from app.modules.strategy_service.models.backtest_model import Backtest
+from app.modules.strategy_service.models.research_run_model import ResearchRun
 from app.modules.strategy_service.repositories.strategy_repository import StrategyRepository
-from app.modules.strategy_service.repositories.backtest_repository import BacktestRepository
+from app.modules.strategy_service.repositories.research_run_repository import ResearchRunRepository
 from app.modules.strategy_service.services.strategy_service import StrategyService
 from app.modules.strategy_service.schema.strategy_schema import StrategyResponseSchema
 from fastapi.testclient import TestClient
@@ -50,6 +50,7 @@ def mock_strategy_repo(mock_db_session: AsyncMock) -> MagicMock:
     repo.session = mock_db_session
     repo.create = AsyncMock()
     repo.get_by_id = AsyncMock()
+    repo.get_by_user_and_id = AsyncMock()
     repo.get_by_user_id = AsyncMock()
     repo.update = AsyncMock()
     repo.delete = AsyncMock()
@@ -57,12 +58,14 @@ def mock_strategy_repo(mock_db_session: AsyncMock) -> MagicMock:
 
 
 @pytest.fixture
-def mock_backtest_repo(mock_db_session: AsyncMock) -> MagicMock:
-    """Create mock BacktestRepository."""
-    repo = MagicMock(spec=BacktestRepository)
+def mock_run_repo(mock_db_session: AsyncMock) -> MagicMock:
+    """Create mock ResearchRunRepository."""
+    repo = MagicMock(spec=ResearchRunRepository)
     repo.session = mock_db_session
     repo.create = AsyncMock()
-    repo.get_by_strategy_id = AsyncMock()
+    repo.get_runs_paginated = AsyncMock()
+    repo.get_latest_results = AsyncMock()
+    repo.update_latest_run = AsyncMock()
     return repo
 
 

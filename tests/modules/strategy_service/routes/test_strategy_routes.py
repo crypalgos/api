@@ -26,6 +26,8 @@ def make_mock_strategy_schema(
         canvas_json=canvas_json or {"nodes": [], "edges": []},
         compiled_code=compiled_code,
         is_code_modified=is_code_modified,
+        is_template=False,
+        is_archived=False,
         created_at=datetime.now(UTC),
         updated_at=datetime.now(UTC)
     )
@@ -93,7 +95,7 @@ class TestStrategyRoutes:
         assert len(response.json()["data"]["strategies"]) == 2
         assert response.json()["data"]["strategies"][0]["id"] == "strat-1"
         override_strategy_service.list_strategies.assert_called_once_with(
-            user_id="test-user-id", page=1, limit=8, search=""
+            user_id="test-user-id", page=1, limit=8, search="", is_template=None
         )
 
     def test_get_strategy_success(
@@ -149,7 +151,7 @@ class TestStrategyRoutes:
         override_strategy_service: MagicMock,
         override_current_user
     ) -> None:
-        """Test resetting custom changes back to visual canvas template sync."""
+        """Test resetting strategy state to visual builder canvas template sync."""
         mock_strat = make_mock_strategy_schema(strategy_id="strat-id-123", is_code_modified=False)
         override_strategy_service.reset_to_visual_builder.return_value = (200, mock_strat)
 
@@ -161,8 +163,8 @@ class TestStrategyRoutes:
         assert response.status_code == status.HTTP_200_OK
         assert response.json()["data"]["is_code_modified"] is False
         override_strategy_service.reset_to_visual_builder.assert_called_once_with(
-            user_id="test-user-id",
-            strategy_id="strat-id-123"
+            "test-user-id",
+            "strat-id-123"
         )
 
     def test_execute_backtest_success(
@@ -186,7 +188,7 @@ class TestStrategyRoutes:
         }
 
         response = client.post(
-            "/api/v1/strategies/strat-id-123/backtest",
+            "/api/v1/strategies/strat-id-123/backtests",
             json=payload,
             headers={"Authorization": "Bearer test_token"}
         )

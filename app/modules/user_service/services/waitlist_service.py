@@ -1,9 +1,16 @@
 import logging
-from app.exceptions.exceptions import ResourceAlreadyExistsException, ResourceNotFoundException
+
+from app.exceptions.exceptions import (
+    ResourceAlreadyExistsException,
+    ResourceNotFoundException,
+)
 from app.modules.user_service.models.waitlist_model import Waitlist
 from app.modules.user_service.repositories.waitlist_repository import WaitlistRepository
-from app.modules.user_service.schema.waitlist_schema import WaitlistSignupSchema, WaitlistResponseSchema
 from app.modules.user_service.schema.user_schema import GenericMessageSchema
+from app.modules.user_service.schema.waitlist_schema import (
+    WaitlistResponseSchema,
+    WaitlistSignupSchema,
+)
 
 logger = logging.getLogger(__name__)
 

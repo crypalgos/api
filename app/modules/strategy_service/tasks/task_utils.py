@@ -1,13 +1,13 @@
 import asyncio
 import importlib.util
 import logging
-from datetime import datetime
-from typing import Any, AsyncGenerator
-
-from sqlalchemy.ext.asyncio import AsyncSession
 from contextlib import asynccontextmanager
+from datetime import datetime
+from typing import AsyncGenerator
 
 from crypalgos_core.runtime.strategy_base import StrategyBase
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.db.connect_db import AsyncSessionLocal
 from app.modules.strategy_service.models.strategy_model import Strategy
 from app.modules.strategy_service.tasks.ast_validator import validate_strategy_ast
@@ -28,6 +28,8 @@ async def load_and_compile_strategy(strategy_id: str, session: AsyncSession) -> 
     validate_strategy_ast(compiled_script)
 
     spec = importlib.util.spec_from_loader("compiled_strategy", loader=None)
+    if not spec:
+        raise ValueError("Failed to create import spec for strategy.")
     module = importlib.util.module_from_spec(spec)
     exec(compile(compiled_script, "compiled_strategy", "exec"), module.__dict__)
     
@@ -41,15 +43,18 @@ async def load_and_compile_strategy(strategy_id: str, session: AsyncSession) -> 
         
     return strat_class
 
+from app.modules.strategy_service.models.research_run_model import ResearchRun
+
+
 class AsyncProgressFlusher:
     """
     Safely bridges synchronous deep engine simulation loops with asynchronous DB writes.
     The simulation loop calls `update(completed, total)` rapidly in a sync context.
     The `start_polling` asyncio task wakes up periodically and commits the latest values to the DB.
     """
-    def __init__(self, model_class, run_id: str, flush_interval: float = 2.0):
-        self.model_class = model_class
+    def __init__(self, run_id: str, run_type: str, flush_interval: float = 2.0):
         self.run_id = run_id
+        self.run_type = run_type
         self.flush_interval = flush_interval
         self._completed = 0
         self._total = 0
@@ -74,21 +79,30 @@ class AsyncProgressFlusher:
             if c > self._last_flushed_completed and t > 0:
                 self._last_flushed_completed = c
                 try:
+                    percent = int((c / t) * 100)
+                    progress_info = {"progress_percent": percent}
+                    if self.run_type == "BACKTEST":
+                        progress_info.update({"processed_candles": c, "total_candles": t})
+                    elif self.run_type == "OPTIMIZATION":
+                        progress_info.update({"completed_combinations": c, "total_combinations": t})
+                    elif self.run_type == "WALKFORWARD":
+                        progress_info.update({"completed_windows": c, "total_windows": t})
+                    elif self.run_type == "MONTECARLO":
+                        progress_info.update({"completed_simulations": c, "total_simulations": t})
+
                     async with AsyncSessionLocal() as session:
                         async with session.begin():
-                            run = await session.get(self.model_class, self.run_id)
+                            run = await session.get(ResearchRun, self.run_id)
                             if run and run.status == "RUNNING":
-                                run.progress_json = {
-                                    "completed": c,
-                                    "total": t,
-                                    "percentage": round((c / t) * 100, 2)
-                                }
+                                run.progress_percent = percent
+                                run.progress_json = progress_info
                 except Exception as e:
                     logger.warning(f"Failed to flush progress for {self.run_id}: {e}")
 
+
 @asynccontextmanager
 async def job_lifecycle_context(
-    model_class: type, run_id: str, task_name: str
+    run_id: str, task_name: str
 ) -> AsyncGenerator[None, None]:
     """
     Handles the common boilerplate for background research jobs:
@@ -105,30 +119,29 @@ async def job_lifecycle_context(
     # Mark as RUNNING
     async with AsyncSessionLocal() as session:
         async with session.begin():
-            run = await session.get(model_class, run_id)
+            run = await session.get(ResearchRun, run_id)
             if not run:
-                raise ValueError(f"{model_class.__name__} {run_id} not found.")
+                raise ValueError(f"ResearchRun {run_id} not found.")
             run.status = "RUNNING"
             run.started_at = datetime.utcnow()
 
     try:
-        yield  # Execute the core engine logic
+        yield  # Execute the core logic
         
     except Exception as e:
         logger.error(f"{task_name} run {run_id} failed: {e}")
         err_msg = str(e)[:500]
         async with AsyncSessionLocal() as session:
             async with session.begin():
-                run = await session.get(model_class, run_id)
+                run = await session.get(ResearchRun, run_id)
                 if run:
                     run.status = "FAILED"
                     run.completed_at = datetime.utcnow()
-                    if hasattr(run, "error_message"):
-                        run.error_message = err_msg
-                    # Specific fallback for backtests which use metrics_json
-                    elif hasattr(run, "metrics_json"):
-                        metrics = run.metrics_json or {}
-                        metrics["error"] = err_msg
-                        run.metrics_json = metrics
+                    run.progress_percent = 100
+                    if not run.summary_json:
+                        run.summary_json = {}
+                    summary = dict(run.summary_json)
+                    summary["error"] = err_msg
+                    run.summary_json = summary
         # Re-raise so celery marks the task as failed
         raise e
