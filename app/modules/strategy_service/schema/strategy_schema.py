@@ -42,8 +42,6 @@ class StrategyResponseSchema(BaseModel):
     compiled_hash: Optional[str] = None
     current_version: int = 0
     has_unpublished_changes: bool = True
-    golden_version_id: Optional[str] = None
-
 
     created_at: datetime
     updated_at: datetime
@@ -81,8 +79,6 @@ class StrategyResponseSchema(BaseModel):
                     data.has_unpublished_changes = True
                 except AttributeError:
                     pass
-            # Since version is a property, it might return None if current_version is None, or not be writeable.
-            # But we can try to set it or just return a wrapper if needed. Pydantic extracts it via getattr.
         return data
 
 
@@ -98,6 +94,7 @@ class StrategyVersionResponseSchema(BaseModel):
     is_code_modified: bool
     label: Optional[str] = None
     approval_status: str = "DRAFT"
+    is_golden: bool = False
     created_at: datetime
 
 
@@ -211,8 +208,10 @@ class MonteCarloRequestSchema(BaseModel):
 class ResearchRunResponseSchema(BaseModel):
     id: str
     strategy_id: str
-    type: str
-    strategy_version: int
+    run_type: str = Field(..., alias="type")
+    strategy_version_id: Optional[str] = None
+    run_hash: Optional[str] = None
+    artifact_size_bytes: Optional[int] = None
     compiled_hash: Optional[str] = None
     name: str
     description: Optional[str] = None
@@ -230,9 +229,9 @@ class ResearchRunResponseSchema(BaseModel):
     created_at: datetime
     updated_at: datetime
 
-
     class Config:
         from_attributes = True
+        populate_by_name = True
 
 class ResearchRunTriggerResponseSchema(BaseModel):
     run_id: str

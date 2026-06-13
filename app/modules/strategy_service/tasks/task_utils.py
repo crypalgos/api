@@ -23,7 +23,9 @@ async def load_and_compile_strategy(
     and dynamically compiles the python string into a StrategyBase class.
     """
     if strategy_version_id:
-        from app.modules.strategy_service.models.strategy_version_model import StrategyVersion
+        from app.modules.strategy_service.models.strategy_version_model import (
+            StrategyVersion,
+        )
         version = await session.get(StrategyVersion, strategy_version_id)
         if not version:
             raise ValueError(f"StrategyVersion {strategy_version_id} not found in database.")

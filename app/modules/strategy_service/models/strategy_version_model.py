@@ -2,15 +2,15 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Dict
 
-from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, String, Index, Text
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
 from app.config.base import Base
 
 if TYPE_CHECKING:
-    from app.modules.strategy_service.models.strategy_model import Strategy
     from app.modules.strategy_service.models.research_run_model import ResearchRun
+    from app.modules.strategy_service.models.strategy_model import Strategy
 
 
 class StrategyVersion(Base):
@@ -41,6 +41,7 @@ class StrategyVersion(Base):
     is_code_modified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     label: Mapped[str | None] = mapped_column(String(255), nullable=True)
     approval_status: Mapped[str] = mapped_column(String(32), default="DRAFT", nullable=False)
+    is_golden: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

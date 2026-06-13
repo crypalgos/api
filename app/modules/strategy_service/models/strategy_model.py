@@ -1,5 +1,5 @@
 import uuid
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List
 
 from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -75,14 +75,7 @@ class Strategy(Base):
     versions: Mapped[List["StrategyVersion"]] = relationship(
         "StrategyVersion", back_populates="strategy", cascade="all, delete-orphan", foreign_keys="[StrategyVersion.strategy_id]"
     )
-    golden_version_id: Mapped[str | None] = mapped_column(
-        String(150),
-        ForeignKey("strategy_versions.id", ondelete="SET NULL"),
-        nullable=True,
-    )
-    golden_version: Mapped[Optional["StrategyVersion"]] = relationship(
-        "StrategyVersion", foreign_keys=[golden_version_id]
-    )
+
 
     @property
     def version(self) -> int:
@@ -92,7 +85,6 @@ class Strategy(Base):
 
 # Import here to avoid circular imports during mapper initialization
 from app.modules.strategy_service.models.strategy_version_model import StrategyVersion
-from app.modules.strategy_service.models.research_note_model import ResearchNote
 
 
 

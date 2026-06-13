@@ -35,7 +35,7 @@ class ResearchRunRepository(BaseRepository[ResearchRun]):
         if strategy_id:
             filters.append(ResearchRun.strategy_id == strategy_id)
         if run_type:
-            filters.append(ResearchRun.type == run_type)
+            filters.append(ResearchRun.run_type == run_type)
         if status:
             filters.append(ResearchRun.status == status)
         if is_favorite is not None:

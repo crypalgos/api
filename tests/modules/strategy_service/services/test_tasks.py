@@ -43,6 +43,10 @@ async def test_run_asynchronous_backtest_task_success(
         return None
     mock_session.get.side_effect = get_side_effect
     
+    mock_execute_res = MagicMock()
+    mock_execute_res.scalar_one_or_none.return_value = None
+    mock_session.execute.return_value = mock_execute_res
+
     # Configure session.begin() to support async context manager interface
     mock_session.begin = MagicMock()
     mock_session.begin.return_value.__aenter__ = AsyncMock()
@@ -197,6 +201,10 @@ class MaliciousStrategy:
     mock_session = AsyncMock()
     mock_session.get.return_value = sample_strategy
     
+    mock_execute_res = MagicMock()
+    mock_execute_res.scalar_one_or_none.return_value = None
+    mock_session.execute.return_value = mock_execute_res
+
     mock_session.begin = MagicMock()
     mock_session.begin.return_value.__aenter__ = AsyncMock()
     mock_session.begin.return_value.__aexit__ = AsyncMock()

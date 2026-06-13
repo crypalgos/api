@@ -52,6 +52,19 @@ async def _execute_montecarlo_internal(
             ruin_threshold_pct=0.20,
         )
 
+        # Compute comprehensive run hash
+        import hashlib
+        import json
+        hash_payload = {
+            "strategy_version_id": strategy_version_id,
+            "source_backtest_id": source_backtest_id,
+            "simulation_count": simulation_count,
+            "method": method,
+            "random_seed": random_seed,
+        }
+        hash_str = json.dumps(hash_payload, sort_keys=True, separators=(",", ":"))
+        run_hash = hashlib.sha256(hash_str.encode("utf-8")).hexdigest()
+
         class MockResearchResult:
             def __init__(self, trades):
                 self.trades = trades
@@ -80,13 +93,15 @@ async def _execute_montecarlo_internal(
             "simulation_count": simulation_count,
         }
 
-        metadata_key = f"reports/{strategy_id}/runs/{run_id}/metadata.msgpack.zstd"
-        report_key = f"reports/{strategy_id}/runs/{run_id}/report.msgpack.zstd"
-        latest_key = f"reports/{strategy_id}/latest/montecarlo.msgpack.zstd"
+        # Measure size of S3 artifacts
+        import msgpack
+        artifact_size = len(msgpack.packb(report_payload, use_bin_type=True))
+
+        metadata_key = f"research/{strategy_id}/montecarlos/{run_id}/metadata.msgpack.zstd"
+        report_key = f"research/{strategy_id}/montecarlos/{run_id}/report.msgpack.zstd"
 
         await storage_service.upload_payload(metadata_key, meta_payload)
         await storage_service.upload_payload(report_key, report_payload)
-        await storage_service.upload_payload(latest_key, report_payload)
 
         # Build database summary (extract percentile/metrics from Monte Carlo report)
         summary_json = {
@@ -106,6 +121,8 @@ async def _execute_montecarlo_internal(
                     run.metadata_s3_key = metadata_key
                     run.report_s3_key = report_key
                     run.summary_json = summary_json
+                    run.run_hash = run_hash
+                    run.artifact_size_bytes = artifact_size
 
                 # Register latest montecarlo mapping
                 latest = await session.get(StrategyLatestResults, strategy_id)

@@ -1,5 +1,5 @@
-import logging
 import hashlib
+import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -20,17 +20,15 @@ from app.modules.strategy_service.repositories.strategy_repository import (
 from app.modules.strategy_service.schema.strategy_schema import (
     PaginatedResearchRunsResponseSchema,
     PaginatedStrategiesResponseSchema,
+    ResearchNoteResponseSchema,
     ResearchRunProgressResponseSchema,
     ResearchRunResponseSchema,
     StrategyResponseSchema,
-    TemplateLibraryItemSchema,
-    SaveVersionRequestSchema,
     StrategyVersionResponseSchema,
+    TemplateLibraryItemSchema,
     VersionDiffResponseSchema,
-    ResearchNoteResponseSchema,
 )
 from app.modules.strategy_service.services.storage_service import storage_service
-
 
 if not hasattr(DAGCompiler, "compile_dag"):
     DAGCompiler.compile_dag = staticmethod(compile_dag)
@@ -254,9 +252,8 @@ class StrategyService:
 
         run = ResearchRun(
             strategy_id=strategy_id,
-            type="BACKTEST",
+            run_type="BACKTEST",
             strategy_version_id=active_version.id,
-            strategy_version=active_version.version,
             compiled_hash=active_version.compiled_hash,
             parent_run_id=parent_run_id,
             name=f"Backtest {datetime.utcnow().strftime('%Y-%m-%d %H:%M')}",
@@ -298,9 +295,8 @@ class StrategyService:
 
         run = ResearchRun(
             strategy_id=strategy_id,
-            type="OPTIMIZATION",
+            run_type="OPTIMIZATION",
             strategy_version_id=active_version.id,
-            strategy_version=active_version.version,
             compiled_hash=active_version.compiled_hash,
             parent_run_id=parent_run_id,
             name=f"Optimization {datetime.utcnow().strftime('%Y-%m-%d %H:%M')}",
@@ -356,9 +352,8 @@ class StrategyService:
 
         run = ResearchRun(
             strategy_id=strategy_id,
-            type="WALKFORWARD",
+            run_type="WALKFORWARD",
             strategy_version_id=active_version.id,
-            strategy_version=active_version.version,
             compiled_hash=active_version.compiled_hash,
             parent_run_id=parent_run_id,
             name=f"WalkForward {datetime.utcnow().strftime('%Y-%m-%d %H:%M')}",
@@ -401,9 +396,8 @@ class StrategyService:
 
         run = ResearchRun(
             strategy_id=strategy_id,
-            type="MONTECARLO",
+            run_type="MONTECARLO",
             strategy_version_id=active_version.id,
-            strategy_version=active_version.version,
             compiled_hash=active_version.compiled_hash,
             parent_run_id=source_backtest_id,
             name=f"Monte Carlo {datetime.utcnow().strftime('%Y-%m-%d %H:%M')}",
@@ -480,7 +474,7 @@ class StrategyService:
             "report": report,
             "id": run.id,
             "status": run.status,
-            "type": run.type,
+            "type": run.run_type,
             "name": run.name,
             "description": run.description,
             "is_favorite": run.is_favorite,
@@ -488,6 +482,11 @@ class StrategyService:
             "summary_json": run.summary_json,
             "completed_at": run.completed_at,
             "created_at": run.created_at,
+            "run_hash": run.run_hash,
+            "artifact_size_bytes": run.artifact_size_bytes,
+            "strategy_version_id": run.strategy_version_id,
+            "parent_run_id": run.parent_run_id,
+            "updated_at": run.updated_at,
         }
 
     async def edit_run(
@@ -580,17 +579,38 @@ class StrategyService:
     async def get_latest_run(
         self, user_id: str, strategy_id: str, run_type: str
     ) -> tuple[int, Dict[str, Any]]:
-        """Download latest run directly from the latest/ storage folder."""
+        """Retrieve latest run report by looking up latest run ID from database and downloading its S3 artifact."""
         strategy = await self.strategy_repository.get_by_user_and_id(user_id, strategy_id)
         if not strategy:
             raise ResourceNotFoundException("Strategy not found")
 
-        latest_key = f"reports/{strategy_id}/latest/{run_type.lower()}.msgpack.zstd"
+        latest = await self.run_repository.get_latest_results(strategy_id)
+        if not latest:
+            raise ResourceNotFoundException("Latest run not found for this strategy.")
+
+        run_id = None
+        rt_upper = run_type.upper()
+        if rt_upper == "BACKTEST":
+            run_id = latest.latest_backtest_id
+        elif rt_upper == "OPTIMIZATION":
+            run_id = latest.latest_optimization_id
+        elif rt_upper == "WALKFORWARD":
+            run_id = latest.latest_walkforward_id
+        elif rt_upper == "MONTECARLO":
+            run_id = latest.latest_montecarlo_id
+
+        if not run_id:
+            raise ResourceNotFoundException("Latest run not found for this strategy.")
+
+        run = await self.run_repository.get_by_id(run_id)
+        if not run or not run.report_s3_key:
+            raise ResourceNotFoundException("Latest run report not found in storage.")
+
         try:
-            report_payload = await storage_service.download_payload(latest_key)
+            report_payload = await storage_service.download_payload(run.report_s3_key)
             return 200, report_payload
         except Exception:
-            raise ResourceNotFoundException("Latest run not found for this strategy.")
+            raise ResourceNotFoundException("Latest run report not found in storage.")
 
     async def get_template_library(self, user_id: str) -> tuple[int, List[TemplateLibraryItemSchema]]:
         """List strategies that are marked as templates, returning their latest runs summaries."""
@@ -662,8 +682,11 @@ class StrategyService:
         creates a new StrategyVersion snapshot, increments current_version, and marks has_unpublished_changes = False.
         Otherwise, returns the StrategyVersion corresponding to current_version.
         """
-        from sqlalchemy import select, func
-        from app.modules.strategy_service.models.strategy_version_model import StrategyVersion
+        from sqlalchemy import func, select
+
+        from app.modules.strategy_service.models.strategy_version_model import (
+            StrategyVersion,
+        )
 
         # Calculate compiled hash of current draft code
         if isinstance(strategy.compiled_code, str):
@@ -718,8 +741,11 @@ class StrategyService:
         self, user_id: str, strategy_id: str, commit_message: str | None
     ) -> tuple[int, StrategyVersionResponseSchema]:
         """Manually save a snapshot version of the strategy draft."""
-        from sqlalchemy import select, func
-        from app.modules.strategy_service.models.strategy_version_model import StrategyVersion
+        from sqlalchemy import func, select
+
+        from app.modules.strategy_service.models.strategy_version_model import (
+            StrategyVersion,
+        )
 
         strategy = await self.strategy_repository.get_by_user_and_id(user_id, strategy_id)
         if not strategy or strategy.is_archived:
@@ -767,7 +793,10 @@ class StrategyService:
     ) -> tuple[int, list[StrategyVersionResponseSchema]]:
         """List version history of a strategy."""
         from sqlalchemy import select
-        from app.modules.strategy_service.models.strategy_version_model import StrategyVersion
+
+        from app.modules.strategy_service.models.strategy_version_model import (
+            StrategyVersion,
+        )
 
         strategy = await self.strategy_repository.get_by_user_and_id(user_id, strategy_id)
         if not strategy or strategy.is_archived:
@@ -785,7 +814,10 @@ class StrategyService:
     ) -> tuple[int, StrategyVersionResponseSchema]:
         """Fetch details of a specific strategy version."""
         from sqlalchemy import select
-        from app.modules.strategy_service.models.strategy_version_model import StrategyVersion
+
+        from app.modules.strategy_service.models.strategy_version_model import (
+            StrategyVersion,
+        )
 
         strategy = await self.strategy_repository.get_by_user_and_id(user_id, strategy_id)
         if not strategy or strategy.is_archived:
@@ -806,7 +838,10 @@ class StrategyService:
     ) -> tuple[int, StrategyResponseSchema]:
         """Restore a historical version snapshot into the current draft, setting has_unpublished_changes = True."""
         from sqlalchemy import select
-        from app.modules.strategy_service.models.strategy_version_model import StrategyVersion
+
+        from app.modules.strategy_service.models.strategy_version_model import (
+            StrategyVersion,
+        )
 
         strategy = await self.strategy_repository.get_by_user_and_id(user_id, strategy_id)
         if not strategy or strategy.is_archived:
@@ -842,8 +877,12 @@ class StrategyService:
     ) -> tuple[int, VersionDiffResponseSchema]:
         """Compare a version snapshot against the current draft."""
         import difflib
+
         from sqlalchemy import select
-        from app.modules.strategy_service.models.strategy_version_model import StrategyVersion
+
+        from app.modules.strategy_service.models.strategy_version_model import (
+            StrategyVersion,
+        )
 
         strategy = await self.strategy_repository.get_by_user_and_id(user_id, strategy_id)
         if not strategy or strategy.is_archived:
@@ -883,7 +922,10 @@ class StrategyService:
     ) -> tuple[int, StrategyVersionResponseSchema]:
         """Update label of a specific strategy version snapshot."""
         from sqlalchemy import select
-        from app.modules.strategy_service.models.strategy_version_model import StrategyVersion
+
+        from app.modules.strategy_service.models.strategy_version_model import (
+            StrategyVersion,
+        )
 
         strategy = await self.strategy_repository.get_by_user_and_id(user_id, strategy_id)
         if not strategy or strategy.is_archived:
@@ -907,7 +949,10 @@ class StrategyService:
     ) -> tuple[int, StrategyVersionResponseSchema]:
         """Update approval status of a specific strategy version snapshot."""
         from sqlalchemy import select
-        from app.modules.strategy_service.models.strategy_version_model import StrategyVersion
+
+        from app.modules.strategy_service.models.strategy_version_model import (
+            StrategyVersion,
+        )
 
         ALLOWED_STATUSES = {"DRAFT", "REVIEWING", "APPROVED", "REJECTED", "PAPER_TRADING", "LIVE"}
         status_upper = status.upper()
@@ -933,10 +978,13 @@ class StrategyService:
 
     async def set_golden_version(
         self, user_id: str, strategy_id: str, version: int
-    ) -> tuple[int, StrategyResponseSchema]:
+    ) -> tuple[int, StrategyVersionResponseSchema]:
         """Set a historical version snapshot as the golden candidate for the strategy."""
-        from sqlalchemy import select
-        from app.modules.strategy_service.models.strategy_version_model import StrategyVersion
+        from sqlalchemy import select, update
+
+        from app.modules.strategy_service.models.strategy_version_model import (
+            StrategyVersion,
+        )
 
         strategy = await self.strategy_repository.get_by_user_and_id(user_id, strategy_id)
         if not strategy or strategy.is_archived:
@@ -951,9 +999,16 @@ class StrategyService:
         if not snapshot:
             raise ResourceNotFoundException("Version not found")
 
-        strategy.golden_version_id = snapshot.id
-        updated_strategy = await self.strategy_repository.update(strategy.id)
-        return 200, StrategyResponseSchema.model_validate(updated_strategy)
+        # Reset all other versions of this strategy
+        await self.strategy_repository.session.execute(
+            update(StrategyVersion)
+            .where(StrategyVersion.strategy_id == strategy_id)
+            .values(is_golden=False)
+        )
+
+        snapshot.is_golden = True
+        await self.strategy_repository.session.commit()
+        return 200, StrategyVersionResponseSchema.model_validate(snapshot)
 
     async def create_research_note(
         self, user_id: str, strategy_id: str, content: str, run_id: str | None = None
@@ -984,6 +1039,7 @@ class StrategyService:
     ) -> tuple[int, list[ResearchNoteResponseSchema]]:
         """List all research notes for a strategy."""
         from sqlalchemy import select
+
         from app.modules.strategy_service.models.research_note_model import ResearchNote
 
         strategy = await self.strategy_repository.get_by_user_and_id(user_id, strategy_id)
@@ -1002,6 +1058,7 @@ class StrategyService:
     ) -> tuple[int, list[ResearchNoteResponseSchema]]:
         """List all research notes for a specific run."""
         from sqlalchemy import select
+
         from app.modules.strategy_service.models.research_note_model import ResearchNote
 
         strategy = await self.strategy_repository.get_by_user_and_id(user_id, strategy_id)

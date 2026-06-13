@@ -2,7 +2,16 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
-from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, String, Index
+from sqlalchemy import (
+    JSON,
+    BigInteger,
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
@@ -10,14 +19,16 @@ from app.config.base import Base
 
 if TYPE_CHECKING:
     from app.modules.strategy_service.models.strategy_model import Strategy
-    from app.modules.strategy_service.models.strategy_version_model import StrategyVersion
+    from app.modules.strategy_service.models.strategy_version_model import (
+        StrategyVersion,
+    )
 
 
 
 class ResearchRun(Base):
     __tablename__ = "research_runs"
     __table_args__ = (
-        Index("idx_runs_strat_type_created", "strategy_id", "type", "created_at"),
+        Index("idx_runs_strat_type_created", "strategy_id", "run_type", "created_at"),
         Index("idx_runs_status", "status"),
         Index("idx_runs_strat_fav", "strategy_id", "is_favorite"),
     )
@@ -35,8 +46,9 @@ class ResearchRun(Base):
         nullable=False,
         index=True
     )
-    type: Mapped[str] = mapped_column(String(32), nullable=False)  # BACKTEST, OPTIMIZATION, WALKFORWARD, MONTECARLO
-    strategy_version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    run_type: Mapped[str] = mapped_column(String(32), nullable=False)  # BACKTEST, OPTIMIZATION, WALKFORWARD, MONTECARLO
+    run_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    artifact_size_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     compiled_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     strategy_version_id: Mapped[str | None] = mapped_column(
         String(150),
@@ -85,10 +97,6 @@ class ResearchRun(Base):
 
 # Import here to avoid circular imports during mapper initialization
 from app.modules.strategy_service.models.strategy_version_model import StrategyVersion
-from app.modules.strategy_service.models.research_note_model import ResearchNote
-
-
-
 
 
 class StrategyLatestResults(Base):

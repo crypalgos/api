@@ -48,6 +48,54 @@ async def _execute_optimization_internal(
             strat_class = await load_and_compile_strategy(strategy_id, session, strategy_version_id=strategy_version_id)
 
 
+        # Compute run hash for caching
+        import hashlib
+        import json
+        hash_payload = {
+            "strategy_version_id": strategy_version_id,
+            "start_date": start_date.isoformat(),
+            "end_date": end_date.isoformat(),
+            "initial_capital": initial_capital,
+            "parameter_space": parameter_space_json,
+            "constraints": constraints_json,
+            "objective": objective,
+            "search_type": search_type,
+            "max_runs": max_runs,
+        }
+        hash_str = json.dumps(hash_payload, sort_keys=True)
+        run_hash = hashlib.sha256(hash_str.encode("utf-8")).hexdigest()
+
+        async with AsyncSessionLocal() as session:
+            from sqlalchemy import select
+            dup_stmt = select(ResearchRun).where(
+                ResearchRun.strategy_id == strategy_id,
+                ResearchRun.run_hash == run_hash,
+                ResearchRun.status == "COMPLETED"
+            ).order_by(ResearchRun.completed_at.desc()).limit(1)
+            dup_res = await session.execute(dup_stmt)
+            duplicate_run = dup_res.scalar_one_or_none()
+
+            if duplicate_run:
+                logger.info(f"Reusing duplicate completed optimization run {duplicate_run.id} for hash {run_hash}")
+                async with session.begin():
+                    run = await session.get(ResearchRun, run_id)
+                    if run:
+                        run.status = "COMPLETED"
+                        run.completed_at = datetime.utcnow()
+                        run.progress_percent = 100
+                        run.metadata_s3_key = duplicate_run.metadata_s3_key
+                        run.report_s3_key = duplicate_run.report_s3_key
+                        run.summary_json = duplicate_run.summary_json
+                        run.run_hash = run_hash
+                        run.artifact_size_bytes = duplicate_run.artifact_size_bytes
+
+                    latest = await session.get(StrategyLatestResults, strategy_id)
+                    if not latest:
+                        latest = StrategyLatestResults(strategy_id=strategy_id)
+                        session.add(latest)
+                    latest.latest_optimization_id = run_id
+                return {"success": True, "run_id": run_id, "total_results": duplicate_run.summary_json.get("total_results", 0) if duplicate_run.summary_json else 0}
+
         # Build OptimizationIR
         params = [ParameterDefinition(**p) for p in parameter_space_json]
         constraints = [Constraint(**c) for c in (constraints_json or [])]
@@ -106,13 +154,15 @@ async def _execute_optimization_internal(
             "total_runs": len(opt_run.results)
         }
 
-        metadata_key = f"reports/{strategy_id}/runs/{run_id}/metadata.msgpack.zstd"
-        report_key = f"reports/{strategy_id}/runs/{run_id}/report.msgpack.zstd"
-        latest_key = f"reports/{strategy_id}/latest/optimization.msgpack.zstd"
+        # Measure size of S3 artifacts
+        import msgpack
+        artifact_size = len(msgpack.packb(report_payload, use_bin_type=True))
+
+        metadata_key = f"research/{strategy_id}/optimization/{run_id}/metadata.msgpack.zstd"
+        report_key = f"research/{strategy_id}/optimization/{run_id}/report.msgpack.zstd"
 
         await storage_service.upload_payload(metadata_key, meta_payload)
         await storage_service.upload_payload(report_key, report_payload)
-        await storage_service.upload_payload(latest_key, report_payload)
 
         # Build database summary (take primary objectives from the best result if it exists)
         best_metrics = best.metrics if best else {}
@@ -124,6 +174,7 @@ async def _execute_optimization_internal(
             "calmar_ratio": best_metrics.get("calmar_ratio"),
             "max_drawdown_pct": best_metrics.get("max_drawdown_pct", 0.0),
             "trade_count": best_metrics.get("trade_count", 0),
+            "total_results": len(opt_run.results),
         }
 
         # Update DB
@@ -137,6 +188,8 @@ async def _execute_optimization_internal(
                     run.metadata_s3_key = metadata_key
                     run.report_s3_key = report_key
                     run.summary_json = summary_json
+                    run.run_hash = run_hash
+                    run.artifact_size_bytes = artifact_size
 
                 # Register latest optimization mapping
                 latest = await session.get(StrategyLatestResults, strategy_id)

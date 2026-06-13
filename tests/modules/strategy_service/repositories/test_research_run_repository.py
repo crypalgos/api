@@ -11,7 +11,7 @@ def run_repo(mock_db_session: AsyncMock) -> ResearchRunRepository:
 
 @pytest.mark.asyncio
 async def test_create_run(run_repo: ResearchRunRepository, mock_db_session: AsyncMock) -> None:
-    run = ResearchRun(id="run-123", strategy_id="strat-123", type="BACKTEST", name="Test Run")
+    run = ResearchRun(id="run-123", strategy_id="strat-123", run_type="BACKTEST", name="Test Run")
     mock_db_session.refresh = AsyncMock()
 
     result = await run_repo.create(run)

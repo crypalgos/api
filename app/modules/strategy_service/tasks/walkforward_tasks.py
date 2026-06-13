@@ -72,6 +72,47 @@ async def _execute_walkforward_internal(
         )
         validate_walk_forward_job(job)
 
+        # Extract parameters from strategy class datasources if present
+        symbols = []
+        dataset_ids = []
+        timeframe = "1m"
+        leverage = 1
+        if hasattr(strat_class, "datasources") and isinstance(strat_class.datasources, dict):
+            for ds_name, ds_info in strat_class.datasources.items():
+                if isinstance(ds_info, dict):
+                    sym = ds_info.get("symbol")
+                    if sym:
+                        symbols.append(sym)
+                    tf = ds_info.get("timeframe")
+                    if tf:
+                        timeframe = tf
+                    ds_id = ds_info.get("dataset_id")
+                    if ds_id:
+                        dataset_ids.append(ds_id)
+                    lev = ds_info.get("leverage")
+                    if lev is not None:
+                        leverage = lev
+
+        # Compute comprehensive run hash
+        import hashlib
+        import json
+        hash_payload = {
+            "strategy_version_id": strategy_version_id,
+            "dataset_ids": sorted(dataset_ids),
+            "symbols": sorted(symbols),
+            "timeframe": timeframe,
+            "start_date": start_date.isoformat(),
+            "end_date": end_date.isoformat(),
+            "initial_capital": initial_capital,
+            "commission": 0.0002,
+            "slippage": 0.0002,
+            "leverage": leverage,
+            "window_config": window_config_json,
+            "objective": objective,
+        }
+        hash_str = json.dumps(hash_payload, sort_keys=True, separators=(",", ":"))
+        run_hash = hashlib.sha256(hash_str.encode("utf-8")).hexdigest()
+
         # Setup progress flusher
         flusher = AsyncProgressFlusher(run_id, "WALKFORWARD")
         flusher_task = asyncio.create_task(flusher.start_polling())
@@ -99,13 +140,15 @@ async def _execute_walkforward_internal(
             "windows_count": len(result.windows),
         }
 
-        metadata_key = f"reports/{strategy_id}/runs/{run_id}/metadata.msgpack.zstd"
-        report_key = f"reports/{strategy_id}/runs/{run_id}/report.msgpack.zstd"
-        latest_key = f"reports/{strategy_id}/latest/walkforward.msgpack.zstd"
+        # Measure size of S3 artifacts
+        import msgpack
+        artifact_size = len(msgpack.packb(report_payload, use_bin_type=True))
+
+        metadata_key = f"research/{strategy_id}/walkforwards/{run_id}/metadata.msgpack.zstd"
+        report_key = f"research/{strategy_id}/walkforwards/{run_id}/report.msgpack.zstd"
 
         await storage_service.upload_payload(metadata_key, meta_payload)
         await storage_service.upload_payload(report_key, report_payload)
-        await storage_service.upload_payload(latest_key, report_payload)
 
         # Build database summary (extract validation metrics from the walkforward report)
         validation_metrics = report.get("validation_metrics", {})
@@ -117,6 +160,7 @@ async def _execute_walkforward_internal(
             "calmar_ratio": validation_metrics.get("calmar_ratio"),
             "max_drawdown_pct": validation_metrics.get("max_drawdown_pct", 0.0),
             "trade_count": validation_metrics.get("trade_count", 0),
+            "windows_count": len(result.windows),
         }
 
         # Update DB
@@ -130,6 +174,8 @@ async def _execute_walkforward_internal(
                     run.metadata_s3_key = metadata_key
                     run.report_s3_key = report_key
                     run.summary_json = summary_json
+                    run.run_hash = run_hash
+                    run.artifact_size_bytes = artifact_size
 
                 # Register latest walkforward mapping
                 latest = await session.get(StrategyLatestResults, strategy_id)

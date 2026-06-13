@@ -29,24 +29,63 @@ async def _execute_backtest_internal(
     strategy_version_id: str | None = None
 ) -> dict[str, Any]:
     async with job_lifecycle_context(backtest_id, "Backtest task"):
-        # Load strategy and determine execution mode
+        # Load strategy and compile class first
         async with AsyncSessionLocal() as session:
+            strat_class = await load_and_compile_strategy(strategy_id, session, strategy_version_id=strategy_version_id)
             if strategy_version_id:
-                from app.modules.strategy_service.models.strategy_version_model import StrategyVersion
+                from app.modules.strategy_service.models.strategy_version_model import (
+                    StrategyVersion,
+                )
                 strategy = await session.get(StrategyVersion, strategy_version_id)
-                if not strategy:
-                    raise ValueError(f"StrategyVersion {strategy_version_id} not found.")
             else:
                 strategy = await session.get(Strategy, strategy_id)
-                if not strategy:
-                    raise ValueError(f"Strategy {strategy_id} not found.")
-            
+
+        # Extract parameters from strategy class datasources if present
+        symbols = []
+        dataset_ids = []
+        timeframe = "1m"
+        leverage = 1
+        if hasattr(strat_class, "datasources") and isinstance(strat_class.datasources, dict):
+            for ds_name, ds_info in strat_class.datasources.items():
+                if isinstance(ds_info, dict):
+                    sym = ds_info.get("symbol")
+                    if sym:
+                        symbols.append(sym)
+                    tf = ds_info.get("timeframe")
+                    if tf:
+                        timeframe = tf
+                    ds_id = ds_info.get("dataset_id")
+                    if ds_id:
+                        dataset_ids.append(ds_id)
+                    lev = ds_info.get("leverage")
+                    if lev is not None:
+                        leverage = lev
+
+        commission = 0.0002 # Default maker fee
+        slippage = 0.0002
+
+        # Compute comprehensive run hash
+        import hashlib
+        import json
+        hash_payload = {
+            "strategy_version_id": strategy_version_id,
+            "dataset_ids": sorted(dataset_ids),
+            "symbols": sorted(symbols),
+            "timeframe": timeframe,
+            "start_date": start_date.isoformat(),
+            "end_date": end_date.isoformat(),
+            "initial_capital": initial_capital,
+            "commission": commission,
+            "slippage": slippage,
+            "leverage": leverage,
+        }
+        hash_str = json.dumps(hash_payload, sort_keys=True, separators=(",", ":"))
+        run_hash = hashlib.sha256(hash_str.encode("utf-8")).hexdigest()
+
         USE_SANDBOX = settings.sandbox_enabled
 
         if not USE_SANDBOX:
             logger.info(f"[DEV] Running backtest in-process for strategy {strategy_id} (version={strategy_version_id})")
-            async with AsyncSessionLocal() as session:
-                strat_class = await load_and_compile_strategy(strategy_id, session, strategy_version_id=strategy_version_id)
 
 
             simulator = EngineSimulator(
@@ -109,15 +148,17 @@ async def _execute_backtest_internal(
         # Clear registry after reading to prevent memory growth
         DatasetRegistry.clear()
 
-        metadata_key = f"reports/{strategy_id}/runs/{backtest_id}/metadata.msgpack.zstd"
-        report_key = f"reports/{strategy_id}/runs/{backtest_id}/report.msgpack.zstd"
-        dataset_key = f"reports/{strategy_id}/runs/{backtest_id}/datasets.arrow.zstd"
-        latest_key = f"reports/{strategy_id}/latest/backtest.msgpack.zstd"
+        # Measure size of S3 artifacts
+        import msgpack
+        artifact_size = len(msgpack.packb(report_payload, use_bin_type=True))
+
+        metadata_key = f"research/{strategy_id}/backtests/{backtest_id}/metadata.msgpack.zstd"
+        report_key = f"research/{strategy_id}/backtests/{backtest_id}/report.msgpack.zstd"
+        dataset_key = f"research/{strategy_id}/backtests/{backtest_id}/datasets.arrow.zstd"
 
         await storage_service.upload_payload(metadata_key, meta_payload)
         await storage_service.upload_payload(report_key, report_payload)
         await storage_service.upload_payload(dataset_key, dataset_payload)
-        await storage_service.upload_payload(latest_key, report_payload)
 
         # Build clean summary json for database index
         total_trades = g_metrics.get("total_trades", g_metrics.get("trade_count", 0))
@@ -156,6 +197,8 @@ async def _execute_backtest_internal(
                     run.report_s3_key = report_key
                     run.dataset_s3_key = dataset_key
                     run.summary_json = summary_json
+                    run.run_hash = run_hash
+                    run.artifact_size_bytes = artifact_size
 
                 # Register/update latest backtest mapping
                 latest = await session.get(StrategyLatestResults, strategy_id)

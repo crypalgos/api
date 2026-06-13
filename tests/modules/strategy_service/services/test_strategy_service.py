@@ -321,6 +321,7 @@ async def test_save_version_success(
         if obj.__class__.__name__ == "StrategyVersion":
             obj.id = "ver-123"
             obj.approval_status = "DRAFT"
+            obj.is_golden = False
             obj.created_at = datetime.now(UTC)
     mock_session.add = MagicMock(side_effect=side_effect_add)
 
@@ -365,6 +366,7 @@ async def test_restore_version_success(
         compiled_code="print('version-1')",
         compiled_hash="ver-1-hash",
         is_code_modified=True,
+        is_golden=False,
     )
     
     mock_session = AsyncMock()
@@ -412,6 +414,7 @@ async def test_diff_version_success(
         compiled_code="line 1\n",
         compiled_hash="ver-1-hash",
         is_code_modified=True,
+        is_golden=False,
     )
     
     mock_session = AsyncMock()
@@ -446,6 +449,7 @@ async def test_update_version_label_success(
         compiled_hash="ver-1-hash",
         is_code_modified=True,
         approval_status="DRAFT",
+        is_golden=False,
         created_at=datetime.now(UTC),
     )
 
@@ -482,6 +486,7 @@ async def test_update_version_approval_success(
         compiled_hash="ver-1-hash",
         is_code_modified=True,
         approval_status="DRAFT",
+        is_golden=False,
         created_at=datetime.now(UTC),
     )
 
@@ -530,6 +535,7 @@ async def test_set_golden_version_success(
         compiled_hash="ver-1-hash",
         is_code_modified=True,
         approval_status="DRAFT",
+        is_golden=False,
         created_at=datetime.now(UTC),
     )
 
@@ -543,9 +549,9 @@ async def test_set_golden_version_success(
     code, result = await strategy_service.set_golden_version("user-123", "strat-123", 1)
     
     assert code == 200
-    assert result.golden_version_id == "ver-1"
-    assert mock_strat.golden_version_id == "ver-1"
-    mock_strategy_repo.update.assert_called_once_with("strat-123")
+    assert result.is_golden is True
+    assert mock_version.is_golden is True
+    mock_session.commit.assert_called_once()
 
 
 @pytest.mark.asyncio
