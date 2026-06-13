@@ -43,7 +43,7 @@ async def test_storage_service_s3_compression_roundtrip(mock_boto_client) -> Non
     # 2. Download
     downloaded_data = await storage.download_payload(test_key)
     assert downloaded_data == test_data
-    mock_s3.get_object.assert_called_once_with(Bucket="", Key=test_key)
+    mock_s3.get_object.assert_called_once_with(Bucket=storage.s3_bucket, Key=test_key)
 
     # 3. Delete directory
     # Setup paginator
