@@ -40,11 +40,13 @@ async def _execute_optimization_internal(
     objective: str,
     search_type: str,
     max_runs: int,
+    strategy_version_id: str | None = None,
 ) -> dict[str, Any]:
     async with job_lifecycle_context(run_id, "Optimization task"):
         # Load and compile strategy
         async with AsyncSessionLocal() as session:
-            strat_class = await load_and_compile_strategy(strategy_id, session)
+            strat_class = await load_and_compile_strategy(strategy_id, session, strategy_version_id=strategy_version_id)
+
 
         # Build OptimizationIR
         params = [ParameterDefinition(**p) for p in parameter_space_json]
@@ -158,6 +160,7 @@ def run_optimization_task(
     objective: str,
     search_type: str,
     max_runs: int,
+    strategy_version_id: str | None = None,
 ) -> dict[str, Any]:
     """Celery background task for parameter optimization using grid or random search."""
     start_date = datetime.fromisoformat(start_date_iso)
@@ -173,4 +176,6 @@ def run_optimization_task(
         objective=objective,
         search_type=search_type,
         max_runs=max_runs,
+        strategy_version_id=strategy_version_id,
     ))
+

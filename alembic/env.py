@@ -12,6 +12,10 @@ from app.modules.user_service.models.waitlist_model import Waitlist
 from app.modules.user_service.models.contact_model import ContactMessage
 from app.modules.strategy_service.models.strategy_model import Strategy  # noqa: F401
 from app.modules.strategy_service.models.research_run_model import ResearchRun, StrategyLatestResults  # noqa: F401
+from app.modules.strategy_service.models.strategy_version_model import StrategyVersion  # noqa: F401
+from app.modules.strategy_service.models.research_note_model import ResearchNote  # noqa: F401
+
+
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

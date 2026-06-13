@@ -1,5 +1,5 @@
 import uuid
-from typing import TYPE_CHECKING, Any, Dict, List
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -12,6 +12,10 @@ if TYPE_CHECKING:
         ResearchRun,
         StrategyLatestResults,
     )
+    from app.modules.strategy_service.models.strategy_version_model import (
+        StrategyVersion,
+    )
+
 
 
 class Strategy(Base):
@@ -44,6 +48,12 @@ class Strategy(Base):
 
     is_template: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_archived: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    
+    strategy_type: Mapped[str] = mapped_column(String(20), default="VISUAL", nullable=False)  # VISUAL or CODE
+    source_code: Mapped[str | None] = mapped_column(String, nullable=True, default=None)
+    compiled_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, default=None)
+    current_version: Mapped[int] = mapped_column(default=0, nullable=False)
+    has_unpublished_changes: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
     created_at: Mapped[DateTime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
@@ -62,3 +72,28 @@ class Strategy(Base):
     latest_results: Mapped["StrategyLatestResults"] = relationship(
         "StrategyLatestResults", back_populates="strategy", cascade="all, delete-orphan", uselist=False
     )
+    versions: Mapped[List["StrategyVersion"]] = relationship(
+        "StrategyVersion", back_populates="strategy", cascade="all, delete-orphan", foreign_keys="[StrategyVersion.strategy_id]"
+    )
+    golden_version_id: Mapped[str | None] = mapped_column(
+        String(150),
+        ForeignKey("strategy_versions.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    golden_version: Mapped[Optional["StrategyVersion"]] = relationship(
+        "StrategyVersion", foreign_keys=[golden_version_id]
+    )
+
+    @property
+    def version(self) -> int:
+        return self.current_version
+
+
+
+# Import here to avoid circular imports during mapper initialization
+from app.modules.strategy_service.models.strategy_version_model import StrategyVersion
+from app.modules.strategy_service.models.research_note_model import ResearchNote
+
+
+
+

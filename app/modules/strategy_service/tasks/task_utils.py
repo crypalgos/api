@@ -15,16 +15,25 @@ from app.modules.strategy_service.tasks.ast_validator import validate_strategy_a
 logger = logging.getLogger(__name__)
 
 
-async def load_and_compile_strategy(strategy_id: str, session: AsyncSession) -> type[StrategyBase]:
+async def load_and_compile_strategy(
+    strategy_id: str, session: AsyncSession, strategy_version_id: str | None = None
+) -> type[StrategyBase]:
     """
-    Fetches the strategy from the database, validates the AST,
+    Fetches the strategy or strategy version from the database, validates the AST,
     and dynamically compiles the python string into a StrategyBase class.
     """
-    strategy = await session.get(Strategy, strategy_id)
-    if not strategy:
-        raise ValueError(f"Strategy {strategy_id} not found in database.")
+    if strategy_version_id:
+        from app.modules.strategy_service.models.strategy_version_model import StrategyVersion
+        version = await session.get(StrategyVersion, strategy_version_id)
+        if not version:
+            raise ValueError(f"StrategyVersion {strategy_version_id} not found in database.")
+        compiled_script = version.compiled_code
+    else:
+        strategy = await session.get(Strategy, strategy_id)
+        if not strategy:
+            raise ValueError(f"Strategy {strategy_id} not found in database.")
+        compiled_script = strategy.compiled_code
 
-    compiled_script = strategy.compiled_code
     validate_strategy_ast(compiled_script)
 
     spec = importlib.util.spec_from_loader("compiled_strategy", loader=None)

@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
-from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, String
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, String, Index
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
@@ -10,10 +10,17 @@ from app.config.base import Base
 
 if TYPE_CHECKING:
     from app.modules.strategy_service.models.strategy_model import Strategy
+    from app.modules.strategy_service.models.strategy_version_model import StrategyVersion
+
 
 
 class ResearchRun(Base):
     __tablename__ = "research_runs"
+    __table_args__ = (
+        Index("idx_runs_strat_type_created", "strategy_id", "type", "created_at"),
+        Index("idx_runs_status", "status"),
+        Index("idx_runs_strat_fav", "strategy_id", "is_favorite"),
+    )
 
     id: Mapped[str] = mapped_column(
         String(150),
@@ -29,6 +36,14 @@ class ResearchRun(Base):
         index=True
     )
     type: Mapped[str] = mapped_column(String(32), nullable=False)  # BACKTEST, OPTIMIZATION, WALKFORWARD, MONTECARLO
+    strategy_version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    compiled_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    strategy_version_id: Mapped[str | None] = mapped_column(
+        String(150),
+        ForeignKey("strategy_versions.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(String, nullable=True, default=None)
     is_favorite: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
@@ -57,6 +72,23 @@ class ResearchRun(Base):
 
     # Relationships
     strategy: Mapped["Strategy"] = relationship("Strategy", back_populates="research_runs")
+    strategy_version: Mapped[Optional["StrategyVersion"]] = relationship("StrategyVersion", back_populates="research_runs")
+    parent_run_id: Mapped[str | None] = mapped_column(
+        String(150),
+        ForeignKey("research_runs.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    parent_run: Mapped[Optional["ResearchRun"]] = relationship("ResearchRun", remote_side=[id])
+
+
+
+# Import here to avoid circular imports during mapper initialization
+from app.modules.strategy_service.models.strategy_version_model import StrategyVersion
+from app.modules.strategy_service.models.research_note_model import ResearchNote
+
+
+
 
 
 class StrategyLatestResults(Base):

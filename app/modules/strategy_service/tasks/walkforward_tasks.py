@@ -39,11 +39,13 @@ async def _execute_walkforward_internal(
     initial_capital: float,
     window_config_json: dict,
     objective: str,
+    strategy_version_id: str | None = None,
 ) -> dict[str, Any]:
     async with job_lifecycle_context(run_id, "Walk-forward task"):
         # Load and compile strategy
         async with AsyncSessionLocal() as session:
-            strat_class = await load_and_compile_strategy(strategy_id, session)
+            strat_class = await load_and_compile_strategy(strategy_id, session, strategy_version_id=strategy_version_id)
+
 
         # Build optimization config from stored parameter_space
         parameter_space_json = window_config_json.get("parameter_space", [])
@@ -148,6 +150,7 @@ def run_walkforward_task(
     initial_capital: float,
     window_config_json: dict,
     objective: str,
+    strategy_version_id: str | None = None,
 ) -> dict[str, Any]:
     """Celery background task for walk-forward out-of-sample validation."""
     start_date = datetime.fromisoformat(start_date_iso)
@@ -160,4 +163,6 @@ def run_walkforward_task(
         initial_capital=initial_capital,
         window_config_json=window_config_json,
         objective=objective,
+        strategy_version_id=strategy_version_id,
     ))
+

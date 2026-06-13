@@ -28,8 +28,10 @@ async def _execute_montecarlo_internal(
     simulation_count: int,
     method: str,
     random_seed: int | None,
+    strategy_version_id: str | None = None,
 ) -> dict[str, Any]:
     async with job_lifecycle_context(run_id, "Monte Carlo task"):
+
         # Fetch the source backtest (read from its S3 report payload instead of database column)
         async with AsyncSessionLocal() as session:
             backtest_run = await session.get(ResearchRun, source_backtest_id)
@@ -123,6 +125,7 @@ def run_montecarlo_task(
     simulation_count: int,
     method: str,
     random_seed: int | None,
+    strategy_version_id: str | None = None,
 ) -> dict[str, Any]:
     """Celery background task for Monte Carlo statistical robustness analysis."""
     return asyncio.run(_execute_montecarlo_internal(
@@ -132,4 +135,6 @@ def run_montecarlo_task(
         simulation_count=simulation_count,
         method=method,
         random_seed=random_seed,
+        strategy_version_id=strategy_version_id,
     ))
+

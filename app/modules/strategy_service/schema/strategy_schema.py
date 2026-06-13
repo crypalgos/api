@@ -2,7 +2,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Shared Enums
@@ -36,6 +36,15 @@ class StrategyResponseSchema(BaseModel):
     is_code_modified: bool
     is_template: bool
     is_archived: bool
+    version: int = 0
+    strategy_type: str = "VISUAL"
+    source_code: Optional[str] = None
+    compiled_hash: Optional[str] = None
+    current_version: int = 0
+    has_unpublished_changes: bool = True
+    golden_version_id: Optional[str] = None
+
+
     created_at: datetime
     updated_at: datetime
     compile_error: Optional[str] = None
@@ -43,6 +52,85 @@ class StrategyResponseSchema(BaseModel):
 
     class Config:
         from_attributes = True
+
+    @model_validator(mode="before")
+    @classmethod
+    def set_defaults(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            if data.get("strategy_type") is None:
+                data["strategy_type"] = "VISUAL"
+            if data.get("current_version") is None:
+                data["current_version"] = 0
+            if data.get("has_unpublished_changes") is None:
+                data["has_unpublished_changes"] = True
+            if data.get("version") is None:
+                data["version"] = data.get("current_version", 0) or 0
+        else:
+            if getattr(data, "strategy_type", None) is None:
+                try:
+                    data.strategy_type = "VISUAL"
+                except AttributeError:
+                    pass
+            if getattr(data, "current_version", None) is None:
+                try:
+                    data.current_version = 0
+                except AttributeError:
+                    pass
+            if getattr(data, "has_unpublished_changes", None) is None:
+                try:
+                    data.has_unpublished_changes = True
+                except AttributeError:
+                    pass
+            # Since version is a property, it might return None if current_version is None, or not be writeable.
+            # But we can try to set it or just return a wrapper if needed. Pydantic extracts it via getattr.
+        return data
+
+
+class StrategyVersionResponseSchema(BaseModel):
+    id: str
+    strategy_id: str
+    version: int
+    commit_message: Optional[str] = None
+    canvas_json: Optional[Dict[str, Any]] = None
+    source_code: Optional[str] = None
+    compiled_code: str
+    compiled_hash: str
+    is_code_modified: bool
+    label: Optional[str] = None
+    approval_status: str = "DRAFT"
+    created_at: datetime
+
+
+    class Config:
+        from_attributes = True
+
+class SaveVersionRequestSchema(BaseModel):
+    commit_message: Optional[str] = None
+
+class VersionDiffResponseSchema(BaseModel):
+    diff_code: str
+    canvas_changed: bool
+
+class UpdateVersionLabelRequestSchema(BaseModel):
+    label: Optional[str] = None
+
+class UpdateVersionApprovalRequestSchema(BaseModel):
+    approval_status: str
+
+class ResearchNoteCreateSchema(BaseModel):
+    content: str
+    run_id: Optional[str] = None
+
+class ResearchNoteResponseSchema(BaseModel):
+    id: str
+    strategy_id: str
+    run_id: Optional[str] = None
+    content: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
 
 class SaveCodeRequestSchema(BaseModel):
     code: str
@@ -53,11 +141,13 @@ class UpdateCanvasRequestSchema(BaseModel):
     description: Optional[str] = None
 
 class PaginatedStrategiesResponseSchema(BaseModel):
+
     total: int
     strategies: List[StrategyResponseSchema]
     current_page: int
     limit: int
     total_pages: int
+
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -122,6 +212,8 @@ class ResearchRunResponseSchema(BaseModel):
     id: str
     strategy_id: str
     type: str
+    strategy_version: int
+    compiled_hash: Optional[str] = None
     name: str
     description: Optional[str] = None
     is_favorite: bool
@@ -134,8 +226,10 @@ class ResearchRunResponseSchema(BaseModel):
     summary_json: Optional[Dict[str, Any]] = None
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
+    parent_run_id: Optional[str] = None
     created_at: datetime
     updated_at: datetime
+
 
     class Config:
         from_attributes = True

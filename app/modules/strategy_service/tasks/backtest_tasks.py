@@ -25,21 +25,29 @@ logger = logging.getLogger(__name__)
 
 async def _execute_backtest_internal(
     backtest_id: str, strategy_id: str,
-    start_date: datetime, end_date: datetime, initial_capital: float
+    start_date: datetime, end_date: datetime, initial_capital: float,
+    strategy_version_id: str | None = None
 ) -> dict[str, Any]:
     async with job_lifecycle_context(backtest_id, "Backtest task"):
         # Load strategy and determine execution mode
         async with AsyncSessionLocal() as session:
-            strategy = await session.get(Strategy, strategy_id)
-            if not strategy:
-                raise ValueError(f"Strategy {strategy_id} not found.")
+            if strategy_version_id:
+                from app.modules.strategy_service.models.strategy_version_model import StrategyVersion
+                strategy = await session.get(StrategyVersion, strategy_version_id)
+                if not strategy:
+                    raise ValueError(f"StrategyVersion {strategy_version_id} not found.")
+            else:
+                strategy = await session.get(Strategy, strategy_id)
+                if not strategy:
+                    raise ValueError(f"Strategy {strategy_id} not found.")
             
         USE_SANDBOX = settings.sandbox_enabled
 
         if not USE_SANDBOX:
-            logger.info(f"[DEV] Running backtest in-process for strategy {strategy_id}")
+            logger.info(f"[DEV] Running backtest in-process for strategy {strategy_id} (version={strategy_version_id})")
             async with AsyncSessionLocal() as session:
-                strat_class = await load_and_compile_strategy(strategy_id, session)
+                strat_class = await load_and_compile_strategy(strategy_id, session, strategy_version_id=strategy_version_id)
+
 
             simulator = EngineSimulator(
                 initial_capital=initial_capital,
@@ -160,7 +168,8 @@ async def _execute_backtest_internal(
 @celery_app.task(name="app.modules.strategy_service.tasks.run_asynchronous_backtest_task")
 def run_asynchronous_backtest_task(
     backtest_id: str, strategy_id: str,
-    start_date_iso: str, end_date_iso: str, initial_capital: float
+    start_date_iso: str, end_date_iso: str, initial_capital: float,
+    strategy_version_id: str | None = None
 ) -> dict[str, Any]:
     """Celery background task orchestrating quantitative backtest simulation."""
     start_date = datetime.fromisoformat(start_date_iso)
@@ -170,5 +179,7 @@ def run_asynchronous_backtest_task(
         strategy_id=strategy_id,
         start_date=start_date,
         end_date=end_date,
-        initial_capital=initial_capital
+        initial_capital=initial_capital,
+        strategy_version_id=strategy_version_id
     ))
+
