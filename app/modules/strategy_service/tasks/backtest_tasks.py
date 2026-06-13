@@ -105,7 +105,6 @@ async def _execute_backtest_internal(
         from crypalgos_core.reporting.dataset_registry import DatasetRegistry
         dataset_payload = dict(DatasetRegistry._store)
         dataset_payload["recent_trades"] = report.get("trades", {}).get("recent_trades", [])
-        dataset_payload["equity_curve"] = report.get("equity_curve", [])
         
         # Clear registry after reading to prevent memory growth
         DatasetRegistry.clear()
