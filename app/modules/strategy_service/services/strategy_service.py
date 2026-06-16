@@ -113,24 +113,165 @@ class StrategyService:
         
     async def get_strategy(self, user_id: str, strategy_id: str) -> tuple[int, StrategyResponseSchema]:
         """Retrieve a specific visual strategy layout."""
-        strategy = await self.strategy_repository.get_by_user_and_id(user_id, strategy_id)
+        from sqlalchemy import select
+        from sqlalchemy.orm import selectinload
+        from app.modules.strategy_service.models.research_run_model import StrategyLatestResults
+
+        stmt = select(Strategy).where(
+            Strategy.id == strategy_id, Strategy.user_id == user_id
+        ).options(
+            selectinload(Strategy.latest_results).selectinload(StrategyLatestResults.latest_backtest)
+        )
+        res = await self.strategy_repository.session.execute(stmt)
+        strategy = res.scalar_one_or_none()
+
         if not strategy or strategy.is_archived:
             raise ResourceNotFoundException("Strategy not found")
-        return 200, StrategyResponseSchema.model_validate(strategy)
+            
+        resp = StrategyResponseSchema.model_validate(strategy)
+
+        # Populate counts for single strategy
+        from sqlalchemy import func
+        count_stmt = select(ResearchRun.run_type, func.count(ResearchRun.id)).where(
+            ResearchRun.strategy_id == strategy_id
+        ).group_by(ResearchRun.run_type)
+        count_res = await self.strategy_repository.session.execute(count_stmt)
+        
+        counts = {"backtests": 0, "montecarlos": 0, "walkforwards": 0, "optimizations": 0}
+        for r_type, cnt in count_res:
+            type_key = f"{r_type.lower()}s"
+            # Map optimization -> optimizations
+            if type_key == "optimizations":
+                type_key = "optimizations"
+            elif type_key == "montecarlos":
+                type_key = "montecarlos"
+            elif type_key == "walkforwards":
+                type_key = "walkforwards"
+            elif type_key == "backtests":
+                type_key = "backtests"
+
+            if type_key in counts:
+                counts[type_key] = cnt
+        resp.research_counts = counts
+
+        # Populate is_golden
+        from app.modules.strategy_service.models.strategy_version_model import StrategyVersion
+        golden_stmt = select(StrategyVersion.id).where(
+            StrategyVersion.strategy_id == strategy_id,
+            StrategyVersion.is_golden == True
+        )
+        golden_res = await self.strategy_repository.session.execute(golden_stmt)
+        resp.is_golden = golden_res.scalar() is not None
+
+        # Populate latest_metrics and equity_preview
+        latest_backtest = strategy.latest_results.latest_backtest if strategy.latest_results else None
+        if latest_backtest and latest_backtest.summary_json:
+            sum_json = latest_backtest.summary_json
+            resp.latest_metrics = {
+                "return_pct": sum_json.get("total_return_pct", 0.0),
+                "sharpe": sum_json.get("sharpe_ratio"),
+                "drawdown": sum_json.get("max_drawdown_pct", 0.0),
+            }
+            resp.equity_preview = sum_json.get("equity_preview")
+        else:
+            resp.latest_metrics = None
+            resp.equity_preview = None
+
+        return 200, resp
 
     async def list_strategies(
-        self, user_id: str, page: int = 1, limit: int = 8, search: str = "", is_template: Optional[bool] = None
+        self, user_id: str, page: int = 1, limit: int = 8, search: str = "", is_template: Optional[bool] = None, archived: bool = False
     ) -> tuple[int, PaginatedStrategiesResponseSchema]:
-        """Retrieve paginated summary list of user strategies, excluding archived ones."""
-        paginated_data = await self.strategy_repository.get_strategies_paginated(user_id, page, limit, search)
+        """Retrieve paginated summary list of user strategies."""
+        paginated_data = await self.strategy_repository.get_strategies_paginated(user_id, page, limit, search, archived=archived)
         
-        # Filter templates if requested, and filter out archived ones
-        items = [s for s in paginated_data["strategies"] if not s.is_archived]
+        # Filter templates if requested
+        items = paginated_data["strategies"]
         if is_template is not None:
             items = [s for s in items if s.is_template == is_template]
 
-        paginated_data["strategies"] = items
-        paginated_data["total"] = len(items)
+        strategy_ids = [s.id for s in items]
+        research_counts_map = {}
+        golden_versions_map = {}
+
+        if strategy_ids:
+            from sqlalchemy import select, func
+            # Query counts
+            count_stmt = select(
+                ResearchRun.strategy_id,
+                ResearchRun.run_type,
+                func.count(ResearchRun.id)
+            ).where(
+                ResearchRun.strategy_id.in_(strategy_ids)
+            ).group_by(
+                ResearchRun.strategy_id, ResearchRun.run_type
+            )
+            count_res = await self.strategy_repository.session.execute(count_stmt)
+            for strat_id, r_type, cnt in count_res:
+                if strat_id not in research_counts_map:
+                    research_counts_map[strat_id] = {
+                        "backtests": 0,
+                        "montecarlos": 0,
+                        "walkforwards": 0,
+                        "optimizations": 0
+                    }
+                
+                type_key = f"{r_type.lower()}s" # BACKTEST -> backtests
+                if type_key == "optimizations":
+                    type_key = "optimizations"
+                elif type_key == "montecarlos":
+                    type_key = "montecarlos"
+                elif type_key == "walkforwards":
+                    type_key = "walkforwards"
+                elif type_key == "backtests":
+                    type_key = "backtests"
+
+                if type_key in research_counts_map[strat_id]:
+                    research_counts_map[strat_id][type_key] = cnt
+
+            # Check golden versions
+            from app.modules.strategy_service.models.strategy_version_model import StrategyVersion
+            golden_stmt = select(StrategyVersion.strategy_id).where(
+                StrategyVersion.strategy_id.in_(strategy_ids),
+                StrategyVersion.is_golden == True
+            )
+            golden_res = await self.strategy_repository.session.execute(golden_stmt)
+            for row in golden_res:
+                golden_versions_map[row[0]] = True
+
+        response_strategies = []
+        for s in items:
+            resp = StrategyResponseSchema.model_validate(s)
+            
+            # Set is_golden
+            resp.is_golden = golden_versions_map.get(s.id, False)
+            
+            # Set research_counts
+            resp.research_counts = research_counts_map.get(s.id, {
+                "backtests": 0,
+                "montecarlos": 0,
+                "walkforwards": 0,
+                "optimizations": 0
+            })
+            
+            # Set latest_metrics & equity_preview
+            latest_backtest = s.latest_results.latest_backtest if s.latest_results else None
+            if latest_backtest and latest_backtest.summary_json:
+                sum_json = latest_backtest.summary_json
+                resp.latest_metrics = {
+                    "return_pct": sum_json.get("total_return_pct", 0.0),
+                    "sharpe": sum_json.get("sharpe_ratio"),
+                    "drawdown": sum_json.get("max_drawdown_pct", 0.0),
+                }
+                resp.equity_preview = sum_json.get("equity_preview")
+            else:
+                resp.latest_metrics = None
+                resp.equity_preview = None
+                
+            response_strategies.append(resp)
+
+        paginated_data["strategies"] = response_strategies
+        paginated_data["total"] = len(response_strategies)
         return 200, PaginatedStrategiesResponseSchema.model_validate(paginated_data)
 
     async def update_canvas(
@@ -234,6 +375,20 @@ class StrategyService:
         strategy.updated_at = datetime.utcnow()  # type: ignore[assignment]
         await self.strategy_repository.update(strategy.id)
         return 200, {"success": True, "message": "Strategy archived successfully."}
+
+    async def restore_strategy(self, user_id: str, strategy_id: str) -> tuple[int, dict]:
+        """Restore/unarchive a strategy from soft delete."""
+        strategy = await self.strategy_repository.get_by_user_and_id(user_id, strategy_id)
+        if not strategy:
+            raise ResourceNotFoundException("Strategy not found")
+            
+        if not strategy.is_archived:
+            return 200, StrategyResponseSchema.model_validate(strategy).model_dump()
+            
+        strategy.is_archived = False
+        strategy.updated_at = datetime.utcnow()  # type: ignore[assignment]
+        updated_strategy = await self.strategy_repository.update(strategy.id)
+        return 200, StrategyResponseSchema.model_validate(updated_strategy).model_dump()
 
     # ─── Research Runs Methods ──────────────────────────────────────────────────
 
@@ -990,23 +1145,32 @@ class StrategyService:
         if not strategy or strategy.is_archived:
             raise ResourceNotFoundException("Strategy not found")
 
-        stmt = select(StrategyVersion).where(
-            StrategyVersion.strategy_id == strategy_id,
-            StrategyVersion.version == version
-        )
-        res = await self.strategy_repository.session.execute(stmt)
-        snapshot = res.scalar_one_or_none()
-        if not snapshot:
-            raise ResourceNotFoundException("Version not found")
+        if version <= 0:
+            # If version is 0 or less, ensure an active version snapshot exists
+            snapshot = await self._ensure_active_version(strategy)
+        else:
+            stmt = select(StrategyVersion).where(
+                StrategyVersion.strategy_id == strategy_id,
+                StrategyVersion.version == version
+            )
+            res = await self.strategy_repository.session.execute(stmt)
+            snapshot = res.scalar_one_or_none()
+            if not snapshot:
+                # Fallback to current version or create one
+                snapshot = await self._ensure_active_version(strategy)
 
-        # Reset all other versions of this strategy
-        await self.strategy_repository.session.execute(
-            update(StrategyVersion)
-            .where(StrategyVersion.strategy_id == strategy_id)
-            .values(is_golden=False)
-        )
+        if snapshot.is_golden:
+            # Toggle off
+            snapshot.is_golden = False
+        else:
+            # Reset all other versions of this strategy
+            await self.strategy_repository.session.execute(
+                update(StrategyVersion)
+                .where(StrategyVersion.strategy_id == strategy_id)
+                .values(is_golden=False)
+            )
+            snapshot.is_golden = True
 
-        snapshot.is_golden = True
         await self.strategy_repository.session.commit()
         return 200, StrategyVersionResponseSchema.model_validate(snapshot)
 

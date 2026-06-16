@@ -97,6 +97,7 @@ async def list_strategies(
     limit: int = 8,
     search: str = "",
     is_template: Optional[bool] = None,
+    archived: bool = False,
     strategy_service: StrategyService = Depends(get_strategy_service)
 ) -> JSONResponse:
     """List saved strategies belonging to the authenticated user with pagination, filtering, and search."""
@@ -105,7 +106,8 @@ async def list_strategies(
         page=page,
         limit=limit,
         search=search,
-        is_template=is_template
+        is_template=is_template,
+        archived=archived
     )
     return BaseResponseHandler.success_response(data=result, status_code=status_code)
 
@@ -214,6 +216,25 @@ async def delete_strategy(
 ) -> JSONResponse:
     """Archive a visual strategy canvas owned by the authenticated user."""
     status_code, result = await strategy_service.delete_strategy(user["user_id"], strategy_id)
+    return BaseResponseHandler.success_response(data=result, status_code=status_code)
+
+
+@strategy_router.post(
+    "/strategies/{strategy_id}/restore",
+    dependencies=[Depends(security)],
+    responses={
+        200: {"model": SuccessResponseSchema[StrategyResponseSchema]},
+        401: {"model": ErrorResponseSchema},
+        404: {"model": ErrorResponseSchema},
+    },
+)
+async def restore_strategy(
+    strategy_id: str,
+    user: Annotated[dict, Depends(get_current_user)],
+    strategy_service: StrategyService = Depends(get_strategy_service)
+) -> JSONResponse:
+    """Restore/unarchive a strategy from soft delete."""
+    status_code, result = await strategy_service.restore_strategy(user["user_id"], strategy_id)
     return BaseResponseHandler.success_response(data=result, status_code=status_code)
 
 
