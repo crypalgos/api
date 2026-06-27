@@ -95,7 +95,7 @@ class TestStrategyRoutes:
         assert len(response.json()["data"]["strategies"]) == 2
         assert response.json()["data"]["strategies"][0]["id"] == "strat-1"
         override_strategy_service.list_strategies.assert_called_once_with(
-            user_id="test-user-id", page=1, limit=8, search="", is_template=None
+            user_id="test-user-id", page=1, limit=8, search="", is_template=None, archived=False
         )
 
     def test_get_strategy_success(

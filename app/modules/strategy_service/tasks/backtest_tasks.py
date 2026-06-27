@@ -90,6 +90,7 @@ async def _execute_backtest_internal(
 
             simulator = EngineSimulator(
                 initial_capital=initial_capital,
+                leverage=leverage,
                 slippage_rate=0.0002,
                 maker_fee_rate=0.0002,
                 taker_fee_rate=0.0004
@@ -160,6 +161,19 @@ async def _execute_backtest_internal(
         await storage_service.upload_payload(report_key, report_payload)
         await storage_service.upload_payload(dataset_key, dataset_payload)
 
+        # Extract and downsample equity curve for preview
+        global_ref = report.get("datasets", {}).get("global_equity_curve")
+        equity_preview = []
+        if global_ref and isinstance(global_ref, dict):
+            global_equity_dataset_id = global_ref.get("dataset_id")
+            if global_equity_dataset_id and global_equity_dataset_id in dataset_payload:
+                full_equity_curve = dataset_payload[global_equity_dataset_id]
+                try:
+                    from crypalgos_core.reporting.compression import downsample_lttb
+                    equity_preview = downsample_lttb(full_equity_curve, threshold=100)
+                except Exception as e:
+                    logger.error(f"Failed to downsample equity curve for preview: {e}")
+
         # Build clean summary json for database index
         total_trades = g_metrics.get("total_trades", g_metrics.get("trade_count", 0))
         net_profit = g_metrics.get("net_profit", 0.0)
@@ -183,6 +197,13 @@ async def _execute_backtest_internal(
             "win_rate": g_metrics.get("win_rate", 0.0),
             "expectancy": expectancy,
             "average_trade": average_trade,
+            "exchange": "delta",
+            "symbol": next(iter(symbols), "BTCUSD"),
+            "start_date": start_date.isoformat(),
+            "end_date": end_date.isoformat(),
+            "initial_capital": initial_capital,
+            "leverage": leverage,
+            "equity_preview": equity_preview,
         }
 
         # Update DB with results

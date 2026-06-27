@@ -110,7 +110,9 @@ async def test_get_strategy_success(
         created_at=datetime.now(UTC),
         updated_at=datetime.now(UTC)
     )
-    mock_strategy_repo.get_by_user_and_id.return_value = mock_saved
+    mock_res = MagicMock()
+    mock_res.scalar_one_or_none.return_value = mock_saved
+    mock_strategy_repo.session.execute.return_value = mock_res
 
     code, result = await strategy_service.get_strategy("user-123", "strat-123")
 
@@ -124,7 +126,9 @@ async def test_get_strategy_not_found(
     mock_strategy_repo: MagicMock
 ) -> None:
     """Test get_strategy raises ResourceNotFoundException if strategy is not found."""
-    mock_strategy_repo.get_by_user_and_id.return_value = None
+    mock_res = MagicMock()
+    mock_res.scalar_one_or_none.return_value = None
+    mock_strategy_repo.session.execute.return_value = mock_res
 
     with pytest.raises(ResourceNotFoundException):
         await strategy_service.get_strategy("user-123", "strat-123")
@@ -148,7 +152,9 @@ async def test_get_strategy_unauthorized(
         created_at=datetime.now(UTC),
         updated_at=datetime.now(UTC)
     )
-    mock_strategy_repo.get_by_user_and_id.return_value = None
+    mock_res = MagicMock()
+    mock_res.scalar_one_or_none.return_value = None
+    mock_strategy_repo.session.execute.return_value = mock_res
 
     with pytest.raises(ResourceNotFoundException):
         await strategy_service.get_strategy("user-123", "strat-123")
@@ -181,7 +187,7 @@ async def test_list_strategies(
     assert len(result.strategies) == 1
     assert result.strategies[0].id == "strat-1"
     mock_strategy_repo.get_strategies_paginated.assert_called_once_with(
-        "user-123", 1, 8, ""
+        "user-123", 1, 8, "", archived=False
     )
 
 

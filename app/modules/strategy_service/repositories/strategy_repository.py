@@ -28,12 +28,17 @@ class StrategyRepository(BaseRepository[Strategy]):
         return result.scalar_one_or_none()
 
     async def get_strategies_paginated(
-        self, user_id: str, page: int = 1, limit: int = 8, search: str = ""
+        self, user_id: str, page: int = 1, limit: int = 8, search: str = "", archived: bool = False
     ) -> dict[str, Any]:
         """Fetch a paginated list of strategies belonging to a user, with optional search filtering."""
+        from sqlalchemy.orm import selectinload
+        from app.modules.strategy_service.models.research_run_model import StrategyLatestResults
+
         offset = (page - 1) * limit
-        stmt = select(Strategy).where(Strategy.user_id == user_id)
-        count_stmt = select(func.count()).select_from(Strategy).where(Strategy.user_id == user_id)
+        stmt = select(Strategy).where(Strategy.user_id == user_id, Strategy.is_archived == archived).options(
+            selectinload(Strategy.latest_results).selectinload(StrategyLatestResults.latest_backtest)
+        )
+        count_stmt = select(func.count()).select_from(Strategy).where(Strategy.user_id == user_id, Strategy.is_archived == archived)
 
         if search:
             search_filter = or_(
@@ -60,3 +65,4 @@ class StrategyRepository(BaseRepository[Strategy]):
             "limit": limit,
             "total_pages": total_pages,
         }
+

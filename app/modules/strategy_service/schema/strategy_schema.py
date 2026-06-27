@@ -48,6 +48,11 @@ class StrategyResponseSchema(BaseModel):
     compile_error: Optional[str] = None
     compile_diagnostics: Optional[List[Dict[str, Any]]] = None
 
+    is_golden: Optional[bool] = False
+    latest_metrics: Optional[Dict[str, Any]] = None
+    equity_preview: Optional[List[List[float]]] = None
+    research_counts: Optional[Dict[str, int]] = None
+
     class Config:
         from_attributes = True
 
