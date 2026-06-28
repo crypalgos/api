@@ -878,3 +878,20 @@ async def get_run_dataset_chart(
         user["user_id"], run_id=run_id, dataset_name=dataset_name
     )
     return BaseResponseHandler.success_response(data=result, status_code=status_code)
+
+@strategy_router.get(
+    "/research-runs/{run_id}/artifacts/{artifact_type}",
+    dependencies=[Depends(security)],
+)
+async def get_run_artifact(
+    run_id: str,
+    artifact_type: str,
+    user: Annotated[dict, Depends(get_current_user)],
+    strategy_service: StrategyService = Depends(get_strategy_service)
+) -> JSONResponse:
+    """Download a specific artifact for a run."""
+    status_code, result = await strategy_service.get_run_artifact(
+        user["user_id"], run_id=run_id, artifact_type=artifact_type
+    )
+    return BaseResponseHandler.success_response(data=result, status_code=status_code)
+

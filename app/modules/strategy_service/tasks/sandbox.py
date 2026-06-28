@@ -165,6 +165,7 @@ logging.getLogger("BacktestingEngine.Simulator").setLevel(logging.ERROR)
 
 sys.path.insert(0, "/app")
 
+from crypalgos_data.exchanges.config import EXCHANGE_REGISTRY
 from crypalgos_core.runtime.simulator import EngineSimulator
 from crypalgos_core.runtime.strategy_base import StrategyBase
 
@@ -219,11 +220,11 @@ def run():
         raise ValueError("No StrategyBase subclass resolved in strategy script.")
 
     simulator = EngineSimulator(
+            exchange_config=EXCHANGE_REGISTRY.get(compiled_dag.get('broker', 'delta'), EXCHANGE_REGISTRY['delta'])(),
         initial_capital=initial_capital,
         leverage=leverage,
         slippage_rate=0.0002,
-        maker_fee_rate=0.0002,
-        taker_fee_rate=0.0004
+        taker_fee_rate=0.0005
     )
 
     report = simulator.run(

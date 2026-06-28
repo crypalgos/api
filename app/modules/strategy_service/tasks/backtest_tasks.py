@@ -3,6 +3,7 @@ import logging
 from datetime import datetime
 from typing import Any
 
+from crypalgos_data.exchanges.config import EXCHANGE_REGISTRY
 from crypalgos_core.runtime.simulator import EngineSimulator
 
 from app.celery_app import celery_app
@@ -88,12 +89,15 @@ async def _execute_backtest_internal(
             logger.info(f"[DEV] Running backtest in-process for strategy {strategy_id} (version={strategy_version_id})")
 
 
+            from crypalgos_core.reporting.dataset_registry import DatasetRegistry
+            DatasetRegistry._store.clear()
+
             simulator = EngineSimulator(
+            exchange_config=EXCHANGE_REGISTRY.get(compiled_dag.get('broker', 'delta'), EXCHANGE_REGISTRY['delta'])(),
                 initial_capital=initial_capital,
                 leverage=leverage,
                 slippage_rate=0.0002,
-                maker_fee_rate=0.0002,
-                taker_fee_rate=0.0004
+                taker_fee_rate=0.0005
             )
             
             # Setup progress flusher
@@ -120,16 +124,23 @@ async def _execute_backtest_internal(
                 initial_capital=initial_capital
             )
 
-        raw_metrics = report.get("metrics", {})
+        if hasattr(report, "report"):
+            from dataclasses import asdict
+            run_dict = asdict(report)
+            raw_metrics = run_dict["report"].get("metrics", {})
+            market_data_payload = run_dict.pop("market_data", [])
+            report_payload = run_dict
+            trades = run_dict.get("trades", [])
+        else:
+            run_dict = report
+            raw_metrics = run_dict.get("metrics", {})
+            market_data_payload = run_dict.pop("market_data", [])
+            report_payload = run_dict
+            trades = run_dict.get("trades", {}).get("recent_trades", [])
+
         g_metrics = raw_metrics.get("global", raw_metrics.get("global_metrics", raw_metrics))
 
-        charting = {
-            "datasets": report.get("datasets", {}),
-            "trades": report.get("trades", {}),
-            "monthly": report.get("monthly", {}),
-            "correlations": report.get("correlations", {})
-        }
-
+        
         # S3-First storage uploads
         meta_payload = {
             "start_date": start_date.isoformat(),
@@ -137,32 +148,56 @@ async def _execute_backtest_internal(
             "initial_capital": initial_capital,
             "strategy_id": strategy_id,
             "run_id": backtest_id,
+            "market_data": market_data_payload,
         }
-        report_payload = {
-            "metrics": raw_metrics,
-            "charting": charting,
-        }
+        
         from crypalgos_core.reporting.dataset_registry import DatasetRegistry
         dataset_payload = dict(DatasetRegistry._store)
-        dataset_payload["recent_trades"] = report.get("trades", {}).get("recent_trades", [])
+        dataset_payload["recent_trades"] = trades
         
-        # Clear registry after reading to prevent memory growth
         DatasetRegistry.clear()
+        
+        # Build pyarrow tables
+        import pyarrow as pa
+        import io, tarfile
+        import zstandard as zstd
+        
+        # Convert dictionary to pyarrow table helper
+        def to_table(data_list):
+            if not data_list:
+                return pa.Table.from_arrays([pa.array([])], names=["empty"])
+            if isinstance(data_list[0], dict):
+                # Ensure all dicts have same keys
+                keys = data_list[0].keys()
+                arrays = {k: [] for k in keys}
+                for row in data_list:
+                    for k in keys:
+                        val = row.get(k)
+                        # Basic handling of nested dicts (like exit_reason) -> JSON string
+                        if isinstance(val, (dict, list)):
+                            import json
+                            val = json.dumps(val)
+                        arrays[k].append(val)
+                return pa.Table.from_pydict(arrays)
+            elif isinstance(data_list[0], list):
+                # Matrix (e.g. timestamps + values)
+                num_cols = len(data_list[0])
+                arrays = [ [] for _ in range(num_cols) ]
+                for row in data_list:
+                    for i, val in enumerate(row):
+                        arrays[i].append(val)
+                names = [f"col_{i}" for i in range(num_cols)]
+                if num_cols == 2:
+                    names = ["timestamp", "value"]
+                return pa.Table.from_arrays([pa.array(a) for a in arrays], names=names)
+            return pa.Table.from_arrays([pa.array(data_list)], names=["value"])
 
-        # Measure size of S3 artifacts
-        import msgpack
-        artifact_size = len(msgpack.packb(report_payload, use_bin_type=True))
-
+        # 1. metadata.msgpack.zstd
         metadata_key = f"research/{strategy_id}/backtests/{backtest_id}/metadata.msgpack.zstd"
-        report_key = f"research/{strategy_id}/backtests/{backtest_id}/report.msgpack.zstd"
-        dataset_key = f"research/{strategy_id}/backtests/{backtest_id}/datasets.arrow.zstd"
-
         await storage_service.upload_payload(metadata_key, meta_payload)
-        await storage_service.upload_payload(report_key, report_payload)
-        await storage_service.upload_payload(dataset_key, dataset_payload)
-
-        # Extract and downsample equity curve for preview
-        global_ref = report.get("datasets", {}).get("global_equity_curve")
+        
+        # Extract and downsample equity curve for preview BEFORE deleting datasets
+        global_ref = run_dict.get("report", {}).get("datasets", {}).get("global_equity_curve")
         equity_preview = []
         if global_ref and isinstance(global_ref, dict):
             global_equity_dataset_id = global_ref.get("dataset_id")
@@ -173,6 +208,53 @@ async def _execute_backtest_internal(
                     equity_preview = downsample_lttb(full_equity_curve, threshold=100)
                 except Exception as e:
                     logger.error(f"Failed to downsample equity curve for preview: {e}")
+
+        # 2. report.msgpack.zstd
+        report_key = f"research/{strategy_id}/backtests/{backtest_id}/report.msgpack.zstd"
+        await storage_service.upload_payload(report_key, report_payload)
+        
+        import msgpack
+        artifact_size = len(msgpack.packb(report_payload, use_bin_type=True))
+        
+        # 3. workspace.tar.zstd
+        workspace_key = f"research/{strategy_id}/backtests/{backtest_id}/workspace.tar.zstd"
+        tar_io = io.BytesIO()
+        with tarfile.open(fileobj=tar_io, mode='w') as tar:
+            for ds_name, ds_data in dataset_payload.items():
+                try:
+                    tb = to_table(ds_data)
+                    sink = io.BytesIO()
+                    with pa.RecordBatchFileWriter(sink, tb.schema) as writer:
+                        writer.write_table(tb)
+                    buf = sink.getvalue()
+                    tarinfo = tarfile.TarInfo(name=f"{ds_name}.arrow")
+                    tarinfo.size = len(buf)
+                    tar.addfile(tarinfo, io.BytesIO(buf))
+                except Exception as e:
+                    logger.error(f"Failed to convert {ds_name} to Arrow: {e}")
+        
+        compressor = zstd.ZstdCompressor(level=3)
+        workspace_buf = compressor.compress(tar_io.getvalue())
+        await storage_service.upload_raw_payload(workspace_key, workspace_buf)
+        artifact_size += len(workspace_buf)
+        
+        # 4. runtime.arrow.zstd
+        runtime_events = run_dict.get("runtime_events", [])
+        if runtime_events:
+            runtime_key = f"research/{strategy_id}/backtests/{backtest_id}/runtime.arrow.zstd"
+            await storage_service.upload_arrow_payload(runtime_key, to_table(runtime_events))
+            
+        # 5. decision.arrow.zstd
+        decision_traces = run_dict.get("decision_traces", [])
+        if decision_traces:
+            decision_key = f"research/{strategy_id}/backtests/{backtest_id}/decision.arrow.zstd"
+            await storage_service.upload_arrow_payload(decision_key, to_table(decision_traces))
+            
+        # 6. portfolio.arrow.zstd (Placeholder for now as it's not emitted separately)
+        # Actually portfolio timeline is often mixed in dataset_registry as 'global_equity_curve'
+
+
+
 
         # Build clean summary json for database index
         total_trades = g_metrics.get("total_trades", g_metrics.get("trade_count", 0))
@@ -214,9 +296,19 @@ async def _execute_backtest_internal(
                     run.status = "COMPLETED"
                     run.completed_at = datetime.utcnow()
                     run.progress_percent = 100
-                    run.metadata_s3_key = metadata_key
-                    run.report_s3_key = report_key
-                    run.dataset_s3_key = dataset_key
+                    
+                    artifact_manifest = {
+                        "metadata": metadata_key,
+                        "report": report_key,
+                        "workspace": workspace_key
+                    }
+                    if runtime_events:
+                        artifact_manifest["runtime"] = runtime_key
+                    if decision_traces:
+                        artifact_manifest["decision"] = decision_key
+                        
+                    run.artifact_manifest = artifact_manifest
+                    
                     run.summary_json = summary_json
                     run.run_hash = run_hash
                     run.artifact_size_bytes = artifact_size

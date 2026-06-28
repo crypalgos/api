@@ -4,6 +4,7 @@ from typing import Any
 import boto3
 import msgpack
 import zstandard as zstd
+import pyarrow as pa
 from botocore.exceptions import ClientError
 
 from app.config.settings import settings
@@ -37,6 +38,45 @@ class StorageService:
             Body=compressed
         )
         return key
+
+    async def upload_arrow_payload(self, key: str, table: pa.Table) -> str:
+        """Serializes a pyarrow Table to IPC format, compresses with zstd, and uploads to S3."""
+        import io
+        sink = io.BytesIO()
+        with pa.RecordBatchFileWriter(sink, table.schema) as writer:
+            writer.write_table(table)
+        serialized = sink.getvalue()
+        compressed = self.compressor.compress(serialized)
+        
+        await asyncio.to_thread(
+            self.s3_client.put_object,
+            Bucket=self.s3_bucket,
+            Key=key,
+            Body=compressed
+        )
+        return key
+
+    async def upload_raw_payload(self, key: str, data: bytes) -> str:
+        """Uploads raw bytes to S3 without applying msgpack or zstd internally."""
+        await asyncio.to_thread(
+            self.s3_client.put_object,
+            Bucket=self.s3_bucket,
+            Key=key,
+            Body=data
+        )
+        return key
+
+    async def download_raw_payload(self, key: str) -> bytes:
+        """Downloads raw bytes from S3 without decompressing or unpacking."""
+        try:
+            response = await asyncio.to_thread(
+                self.s3_client.get_object,
+                Bucket=self.s3_bucket,
+                Key=key
+            )
+            return response["Body"].read()
+        except ClientError as e:
+            raise FileNotFoundError(f"Key {key} not found in S3: {e}")
 
     async def download_payload(self, key: str) -> Any:
         """Downloads compressed payload from S3, decompresses, and msgpack unpacks it asynchronously."""

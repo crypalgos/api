@@ -64,9 +64,7 @@ class ResearchRun(Base):
     progress_json: Mapped[Dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     report_version: Mapped[str | None] = mapped_column(String(32), nullable=True)
     
-    metadata_s3_key: Mapped[str | None] = mapped_column(String, nullable=True)
-    report_s3_key: Mapped[str | None] = mapped_column(String, nullable=True)
-    dataset_s3_key: Mapped[str | None] = mapped_column(String, nullable=True)
+    artifact_manifest: Mapped[Dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     
     summary_json: Mapped[Dict[str, Any] | None] = mapped_column(JSON, nullable=True)
 

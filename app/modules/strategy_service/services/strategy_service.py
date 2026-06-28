@@ -600,7 +600,7 @@ class StrategyService:
     async def get_run(
         self, user_id: str, strategy_id: str, run_id: str
     ) -> tuple[int, Dict[str, Any]]:
-        """Fetch details of a single run, downloading reports and metadata from storage."""
+        """Fetch details of a single run, returning the artifact manifest for lazy loading."""
         strategy = await self.strategy_repository.get_by_user_and_id(user_id, strategy_id)
         if not strategy:
             raise ResourceNotFoundException("Strategy not found")
@@ -609,24 +609,7 @@ class StrategyService:
         if not run or run.strategy_id != strategy_id:
             raise ResourceNotFoundException("Research run not found")
 
-        metadata = {}
-        report = {}
-
-        if run.metadata_s3_key:
-            try:
-                metadata = await storage_service.download_payload(run.metadata_s3_key)
-            except Exception as e:
-                logger.error(f"Failed to download run metadata: {e}")
-
-        if run.report_s3_key:
-            try:
-                report = await storage_service.download_payload(run.report_s3_key)
-            except Exception as e:
-                logger.error(f"Failed to download run report: {e}")
-
         return 200, {
-            "metadata": metadata,
-            "report": report,
             "id": run.id,
             "status": run.status,
             "type": run.run_type,
@@ -634,7 +617,8 @@ class StrategyService:
             "description": run.description,
             "is_favorite": run.is_favorite,
             "progress_percent": run.progress_percent,
-            "summary_json": run.summary_json,
+            "summary": run.summary_json,
+            "artifacts": run.artifact_manifest,
             "completed_at": run.completed_at,
             "created_at": run.created_at,
             "run_hash": run.run_hash,
@@ -695,12 +679,10 @@ class StrategyService:
             raise ResourceNotFoundException("Strategy not found")
 
         # Delete from storage
-        if run.metadata_s3_key:
-            await storage_service.delete_payload(run.metadata_s3_key)
-        if run.report_s3_key:
-            await storage_service.delete_payload(run.report_s3_key)
-        if run.dataset_s3_key:
-            await storage_service.delete_payload(run.dataset_s3_key)
+        if run.artifact_manifest:
+            for s3_key in run.artifact_manifest.values():
+                if s3_key:
+                    await storage_service.delete_payload(s3_key)
 
         await self.run_repository.delete(run_id)
         return 200, {"success": True, "message": "Research run deleted successfully."}
@@ -808,8 +790,8 @@ class StrategyService:
 
     async def get_run_dataset_chart(
         self, user_id: str, run_id: str, dataset_name: str
-    ) -> tuple[int, List[Any]]:
-        """Download dataset zip file from storage and return specific chart curves."""
+    ) -> tuple[int, list]:
+        """Download dataset tar archive from storage, extract the arrow file, convert to JSON and return specific chart curves."""
         run = await self.run_repository.get_by_id(run_id)
         if not run:
             raise ResourceNotFoundException("Research run not found")
@@ -818,18 +800,64 @@ class StrategyService:
         if not strategy:
             raise ResourceNotFoundException("Strategy not found")
 
-        if not run.dataset_s3_key:
-            raise ResourceNotFoundException("Run dataset has no storage key.")
+        workspace_key = run.artifact_manifest.get("workspace") if run.artifact_manifest else None
+        if not workspace_key:
+            raise ResourceNotFoundException("Run dataset has no workspace key.")
 
         try:
-            dataset_payload = await storage_service.download_payload(run.dataset_s3_key)
+            from app.modules.strategy_service.services.storage_service import storage_service
+            import pyarrow as pa
+            import io, tarfile
+            import zstandard as zstd
+            
+            # Download raw zstd tar
+            raw_zstd = await storage_service.download_raw_payload(workspace_key)
+            dctx = zstd.ZstdDecompressor()
+            tar_io = io.BytesIO(dctx.decompress(raw_zstd))
+            
+            with tarfile.open(fileobj=tar_io, mode='r') as tar:
+                # Find the arrow file inside tar
+                try:
+                    f = tar.extractfile(f"{dataset_name}.arrow")
+                    if not f:
+                        return 200, []
+                    buf = f.read()
+                    with pa.ipc.open_file(io.BytesIO(buf)) as reader:
+                        table = reader.read_all()
+                        return 200, table.to_pylist()
+                except KeyError:
+                    return 200, []
+                    
         except Exception as e:
-            logger.error(f"Failed to download dataset: {e}")
-            raise ResourceNotFoundException("Dataset payload not found in storage.")
+            logger.error(f"Failed to download dataset {dataset_name}: {e}")
+            raise ResourceNotFoundException("Dataset payload not found or failed to parse.")
 
-        chart_data = dataset_payload.get(dataset_name, [])
-        return 200, chart_data
+    async def get_run_artifact(
+        self, user_id: str, run_id: str, artifact_type: str
+    ) -> tuple[int, dict]:
+        """Download a specific artifact (like report or metadata) for a run."""
+        run = await self.run_repository.get_by_id(run_id)
+        if not run:
+            raise ResourceNotFoundException("Research run not found")
 
+        strategy = await self.strategy_repository.get_by_user_and_id(user_id, run.strategy_id)
+        if not strategy:
+            raise ResourceNotFoundException("Strategy not found")
+            
+        key = run.artifact_manifest.get(artifact_type) if run.artifact_manifest else None
+        if not key:
+            raise ResourceNotFoundException(f"Run has no {artifact_type} artifact.")
+            
+        try:
+            from app.modules.strategy_service.services.storage_service import storage_service
+            if key.endswith(".msgpack.zstd"):
+                payload = await storage_service.download_payload(key)
+                return 200, payload
+            else:
+                raise ValueError("Only msgpack JSON artifacts are supported via this endpoint")
+        except Exception as e:
+            logger.error(f"Failed to fetch artifact {artifact_type}: {e}")
+            raise ResourceNotFoundException("Artifact payload not found or failed to parse.")
     async def _ensure_active_version(self, strategy: Strategy) -> Any:
         """
         Ensures a strategy has an active/immutable version snapshot.

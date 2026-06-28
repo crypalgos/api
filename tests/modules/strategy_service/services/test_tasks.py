@@ -103,7 +103,7 @@ async def test_run_asynchronous_backtest_task_success(
         initial_capital=10000.0,
         slippage_rate=0.0002,
         maker_fee_rate=0.0002,
-        taker_fee_rate=0.0004
+        taker_fee_rate=0.0005
     )
     mock_simulator.run.assert_called_once()
 
