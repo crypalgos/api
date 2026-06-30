@@ -46,6 +46,7 @@ async def _execute_backtest_internal(
         dataset_ids = []
         timeframe = "1m"
         leverage = 1
+        exchange_name = "delta"
         if hasattr(strat_class, "datasources") and isinstance(strat_class.datasources, dict):
             for ds_name, ds_info in strat_class.datasources.items():
                 if isinstance(ds_info, dict):
@@ -61,6 +62,9 @@ async def _execute_backtest_internal(
                     lev = ds_info.get("leverage")
                     if lev is not None:
                         leverage = lev
+                    exc = ds_info.get("exchange") or ds_info.get("broker")
+                    if exc:
+                        exchange_name = exc
 
         commission = 0.0002 # Default maker fee
         slippage = 0.0002
@@ -79,6 +83,7 @@ async def _execute_backtest_internal(
             "commission": commission,
             "slippage": slippage,
             "leverage": leverage,
+            "exchange": exchange_name,
         }
         hash_str = json.dumps(hash_payload, sort_keys=True, separators=(",", ":"))
         run_hash = hashlib.sha256(hash_str.encode("utf-8")).hexdigest()
@@ -93,11 +98,10 @@ async def _execute_backtest_internal(
             DatasetRegistry._store.clear()
 
             simulator = EngineSimulator(
-            exchange_config=EXCHANGE_REGISTRY.get(compiled_dag.get('broker', 'delta'), EXCHANGE_REGISTRY['delta'])(),
+                exchange_config=EXCHANGE_REGISTRY.get(exchange_name, EXCHANGE_REGISTRY['delta'])(),
                 initial_capital=initial_capital,
                 leverage=leverage,
-                slippage_rate=0.0002,
-                taker_fee_rate=0.0005
+                slippage_rate=slippage
             )
             
             # Setup progress flusher
@@ -129,14 +133,15 @@ async def _execute_backtest_internal(
             run_dict = asdict(report)
             raw_metrics = run_dict["report"].get("metrics", {})
             market_data_payload = run_dict.pop("market_data", [])
+            trades = run_dict.pop("trades", [])
             report_payload = run_dict
-            trades = run_dict.get("trades", [])
         else:
             run_dict = report
             raw_metrics = run_dict.get("metrics", {})
             market_data_payload = run_dict.pop("market_data", [])
+            trades_dict = run_dict.pop("trades", {})
+            trades = trades_dict.get("recent_trades", []) if isinstance(trades_dict, dict) else trades_dict
             report_payload = run_dict
-            trades = run_dict.get("trades", {}).get("recent_trades", [])
 
         g_metrics = raw_metrics.get("global", raw_metrics.get("global_metrics", raw_metrics))
 
@@ -239,23 +244,20 @@ async def _execute_backtest_internal(
         artifact_size += len(workspace_buf)
         
         # 4. runtime.arrow.zstd
-        runtime_events = run_dict.get("runtime_events", [])
+        runtime_events = run_dict.pop("runtime_events", [])
         if runtime_events:
             runtime_key = f"research/{strategy_id}/backtests/{backtest_id}/runtime.arrow.zstd"
             await storage_service.upload_arrow_payload(runtime_key, to_table(runtime_events))
             
         # 5. decision.arrow.zstd
-        decision_traces = run_dict.get("decision_traces", [])
+        decision_traces = run_dict.pop("decision_traces", [])
         if decision_traces:
             decision_key = f"research/{strategy_id}/backtests/{backtest_id}/decision.arrow.zstd"
             await storage_service.upload_arrow_payload(decision_key, to_table(decision_traces))
             
         # 6. portfolio.arrow.zstd (Placeholder for now as it's not emitted separately)
         # Actually portfolio timeline is often mixed in dataset_registry as 'global_equity_curve'
-
-
-
-
+        
         # Build clean summary json for database index
         total_trades = g_metrics.get("total_trades", g_metrics.get("trade_count", 0))
         net_profit = g_metrics.get("net_profit", 0.0)
@@ -267,6 +269,13 @@ async def _execute_backtest_internal(
         average_trade = g_metrics.get("average_trade")
         if average_trade is None:
             average_trade = net_profit / total_trades if total_trades > 0 else 0.0
+
+        if isinstance(symbols, dict):
+            symbol_str = ", ".join(symbols.keys()) if symbols else "BTCUSD"
+        elif isinstance(symbols, list):
+            symbol_str = ", ".join(symbols) if symbols else "BTCUSD"
+        else:
+            symbol_str = str(symbols) if symbols else "BTCUSD"
 
         summary_json = {
             "net_profit": net_profit,
@@ -280,7 +289,7 @@ async def _execute_backtest_internal(
             "expectancy": expectancy,
             "average_trade": average_trade,
             "exchange": "delta",
-            "symbol": next(iter(symbols), "BTCUSD"),
+            "symbol": symbol_str,
             "start_date": start_date.isoformat(),
             "end_date": end_date.isoformat(),
             "initial_capital": initial_capital,

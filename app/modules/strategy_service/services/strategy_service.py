@@ -824,7 +824,16 @@ class StrategyService:
                     buf = f.read()
                     with pa.ipc.open_file(io.BytesIO(buf)) as reader:
                         table = reader.read_all()
-                        return 200, table.to_pylist()
+                        rows = table.to_pylist()
+                        import json
+                        for row in rows:
+                            for k, v in list(row.items()):
+                                if isinstance(v, str) and (v.startswith("{") or v.startswith("[")):
+                                    try:
+                                        row[k] = json.loads(v)
+                                    except Exception:
+                                        pass
+                        return 200, rows
                 except KeyError:
                     return 200, []
                     
