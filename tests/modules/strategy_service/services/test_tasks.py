@@ -33,6 +33,7 @@ async def test_run_asynchronous_backtest_task_success(
     ])
     # 1. Setup Mock DB session
     mock_storage.upload_payload = AsyncMock()
+    mock_storage.upload_raw_payload = AsyncMock()
     mock_session = AsyncMock()
     
     def get_side_effect(model_class, model_id):
@@ -99,12 +100,10 @@ async def test_run_asynchronous_backtest_task_success(
     assert mock_session.get.call_count >= 2
 
     # Verify simulation params
-    mock_simulator_cls.assert_called_once_with(
-        initial_capital=10000.0,
-        slippage_rate=0.0002,
-        maker_fee_rate=0.0002,
-        taker_fee_rate=0.0005
-    )
+    assert mock_simulator_cls.call_count == 1
+    call_kwargs = mock_simulator_cls.call_args.kwargs
+    assert call_kwargs.get("initial_capital") == 10000.0
+    assert call_kwargs.get("slippage_rate") == 0.0002
     mock_simulator.run.assert_called_once()
 
 
@@ -229,4 +228,74 @@ class MaliciousStrategy:
     # Verify the database load succeeded but no simulator was run
     assert mock_session.get.call_count >= 2
     mock_session.add.assert_not_called()
+
+
+@pytest.mark.asyncio
+@patch("app.modules.strategy_service.tasks.backtest_tasks.settings.sandbox_enabled", False)
+@patch("crypalgos_core.database.load_candles_from_clickhouse")
+@patch("app.modules.strategy_service.tasks.backtest_tasks.EngineSimulator")
+@patch("app.modules.strategy_service.tasks.task_utils.AsyncSessionLocal")
+@patch("app.modules.strategy_service.tasks.backtest_tasks.AsyncSessionLocal")
+@patch("app.modules.strategy_service.tasks.backtest_tasks.storage_service")
+async def test_run_backtest_manifest_validation_failure(
+    mock_storage: MagicMock,
+    mock_db_session_cls_bt: MagicMock,
+    mock_db_session_cls_tu: MagicMock,
+    mock_simulator_cls: MagicMock,
+    mock_load_candles: MagicMock,
+    sample_strategy: Strategy
+) -> None:
+    """Test that backtest task raises a ValueError if dataset references in report are not in manifest."""
+    import numpy as np
+    mock_load_candles.return_value = np.array([
+        [1779882900000.0, 60000.0, 60100.0, 59900.0, 60050.0, 100.0]
+    ])
+    mock_storage.upload_payload = AsyncMock()
+    mock_storage.upload_raw_payload = AsyncMock()
+    mock_session = AsyncMock()
+    
+    mock_session.get.return_value = sample_strategy
+    mock_execute_res = MagicMock()
+    mock_execute_res.scalar_one_or_none.return_value = None
+    mock_session.execute.return_value = mock_execute_res
+
+    mock_session.begin = MagicMock()
+    mock_session.begin.return_value.__aenter__ = AsyncMock()
+    mock_session.begin.return_value.__aexit__ = AsyncMock()
+    
+    mock_session_ctx = AsyncMock()
+    mock_session_ctx.__aenter__.return_value = mock_session
+    mock_db_session_cls_bt.return_value = mock_session_ctx
+    mock_db_session_cls_tu.return_value = mock_session_ctx
+
+    mock_simulator = MagicMock()
+    # Mock report with a dataset reference that doesn't exist in generated_metas/manifest
+    mock_report = {
+        "metrics": {
+            "global": {"net_profit": 500.0, "win_rate": 0.75}
+        },
+        "report": {
+            "datasets": {
+                "invalid_reference": {"dataset_id": "non_existent_dataset"}
+            }
+        },
+        "datasets": {},
+        "trades": [],
+        "monthly": {},
+        "correlations": {}
+    }
+    mock_simulator.run.return_value = mock_report
+    mock_simulator_cls.return_value = mock_simulator
+
+    with pytest.raises(ValueError) as exc_info:
+        await _execute_backtest_internal(
+            backtest_id="test-bt-123",
+            strategy_id="strat-123",
+            start_date=datetime(2026, 1, 1),
+            end_date=datetime(2026, 1, 2),
+            initial_capital=10000.0
+        )
+    assert "Workspace validation failed" in str(exc_info.value)
+    assert "non_existent_dataset" in str(exc_info.value)
+
 

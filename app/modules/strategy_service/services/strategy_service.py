@@ -807,7 +807,7 @@ class StrategyService:
         try:
             from app.modules.strategy_service.services.storage_service import storage_service
             import pyarrow as pa
-            import io, tarfile
+            import io, tarfile, json
             import zstandard as zstd
             
             # Download raw zstd tar
@@ -816,16 +816,41 @@ class StrategyService:
             tar_io = io.BytesIO(dctx.decompress(raw_zstd))
             
             with tarfile.open(fileobj=tar_io, mode='r') as tar:
-                # Find the arrow file inside tar
+                # 1. Read manifest.json
                 try:
-                    f = tar.extractfile(f"{dataset_name}.arrow")
+                    manifest_file = tar.extractfile("manifest.json")
+                    if not manifest_file:
+                        raise ResourceNotFoundException("Workspace manifest.json not found")
+                    manifest = json.loads(manifest_file.read().decode('utf-8'))
+                except KeyError:
+                    raise ResourceNotFoundException("Workspace manifest.json not found")
+                
+                # 2. Find dataset in manifest
+                datasets_list = manifest.get("datasets", [])
+                dataset_meta = None
+                for ds in datasets_list:
+                    if ds.get("dataset_id") == dataset_name:
+                        dataset_meta = ds
+                        break
+                
+                if not dataset_meta:
+                    raise ResourceNotFoundException(f"Dataset {dataset_name} not found in manifest")
+                
+                path = dataset_meta.get("path")
+                if not path:
+                    raise ResourceNotFoundException(f"Path for dataset {dataset_name} not found in manifest")
+                
+                # 3. Extract the file at the resolved path
+                try:
+                    f = tar.extractfile(path)
                     if not f:
-                        return 200, []
+                        raise ResourceNotFoundException(f"Dataset file at {path} not found in workspace archive")
                     buf = f.read()
+                    
                     with pa.ipc.open_file(io.BytesIO(buf)) as reader:
                         table = reader.read_all()
                         rows = table.to_pylist()
-                        import json
+                        
                         for row in rows:
                             for k, v in list(row.items()):
                                 if isinstance(v, str) and (v.startswith("{") or v.startswith("[")):
@@ -835,12 +860,14 @@ class StrategyService:
                                         pass
                         return 200, rows
                 except KeyError:
-                    return 200, []
+                    raise ResourceNotFoundException(f"Dataset file at {path} not found in workspace archive")
                     
+        except ResourceNotFoundException:
+            raise
         except Exception as e:
             logger.error(f"Failed to download dataset {dataset_name}: {e}")
             raise ResourceNotFoundException("Dataset payload not found or failed to parse.")
-
+ 
     async def get_run_artifact(
         self, user_id: str, run_id: str, artifact_type: str
     ) -> tuple[int, dict]:
@@ -848,15 +875,15 @@ class StrategyService:
         run = await self.run_repository.get_by_id(run_id)
         if not run:
             raise ResourceNotFoundException("Research run not found")
-
+ 
         strategy = await self.strategy_repository.get_by_user_and_id(user_id, run.strategy_id)
         if not strategy:
             raise ResourceNotFoundException("Strategy not found")
-            
+             
         key = run.artifact_manifest.get(artifact_type) if run.artifact_manifest else None
         if not key:
             raise ResourceNotFoundException(f"Run has no {artifact_type} artifact.")
-            
+             
         try:
             from app.modules.strategy_service.services.storage_service import storage_service
             if key.endswith(".msgpack.zstd"):
@@ -867,6 +894,7 @@ class StrategyService:
         except Exception as e:
             logger.error(f"Failed to fetch artifact {artifact_type}: {e}")
             raise ResourceNotFoundException("Artifact payload not found or failed to parse.")
+
     async def _ensure_active_version(self, strategy: Strategy) -> Any:
         """
         Ensures a strategy has an active/immutable version snapshot.

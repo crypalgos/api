@@ -134,6 +134,11 @@ async def _execute_backtest_internal(
             raw_metrics = run_dict["report"].get("metrics", {})
             market_data_payload = run_dict.pop("market_data", [])
             trades = run_dict.pop("trades", [])
+            # Pop these immediately so they never leak into the report artifact
+            runtime_events = run_dict.pop("runtime_events", [])
+            decision_traces = run_dict.pop("decision_traces", [])
+            execution_logs = run_dict.pop("execution_logs", [])
+            orders = run_dict.pop("orders", [])
             report_payload = run_dict
         else:
             run_dict = report
@@ -141,6 +146,11 @@ async def _execute_backtest_internal(
             market_data_payload = run_dict.pop("market_data", [])
             trades_dict = run_dict.pop("trades", {})
             trades = trades_dict.get("recent_trades", []) if isinstance(trades_dict, dict) else trades_dict
+            # Pop these immediately so they never leak into the report artifact
+            runtime_events = run_dict.pop("runtime_events", [])
+            decision_traces = run_dict.pop("decision_traces", [])
+            execution_logs = run_dict.pop("execution_logs", [])
+            orders = run_dict.pop("orders", [])
             report_payload = run_dict
 
         g_metrics = raw_metrics.get("global", raw_metrics.get("global_metrics", raw_metrics))
@@ -156,21 +166,46 @@ async def _execute_backtest_internal(
             "market_data": market_data_payload,
         }
         
-        from crypalgos_core.reporting.dataset_registry import DatasetRegistry
+        from crypalgos_core.reporting.dataset_registry import DatasetRegistry, DatasetType
         dataset_payload = dict(DatasetRegistry._store)
-        dataset_payload["recent_trades"] = trades
+        dataset_payload["trades"] = trades
+        dataset_payload["decision_traces"] = decision_traces
+        dataset_payload["runtime_events"] = runtime_events
+        dataset_payload["execution_logs"] = execution_logs
+        dataset_payload["orders"] = orders
         
         DatasetRegistry.clear()
         
         # Build pyarrow tables
         import pyarrow as pa
-        import io, tarfile
+        import io, tarfile, hashlib
         import zstandard as zstd
         
         # Convert dictionary to pyarrow table helper
         def to_table(data_list):
             if not data_list:
                 return pa.Table.from_arrays([pa.array([])], names=["empty"])
+            import json
+            if isinstance(data_list, dict):
+                # Handle dictionaries (e.g. {"BTCUSD_ETHUSD": [[timestamp, value], ...]})
+                rows = []
+                for k, v in data_list.items():
+                    if isinstance(v, list) and v and isinstance(v[0], list) and len(v[0]) == 2:
+                        for row in v:
+                            rows.append({"key": k, "timestamp": row[0], "value": row[1]})
+                    else:
+                        rows.append({"key": k, "value": json.dumps(v) if isinstance(v, (dict, list)) else v})
+                
+                if rows and "timestamp" in rows[0]:
+                    keys = ["key", "timestamp", "value"]
+                else:
+                    keys = ["key", "value"]
+                arrays = {k: [] for k in keys}
+                for row in rows:
+                    for k in keys:
+                        arrays[k].append(row.get(k))
+                return pa.Table.from_pydict(arrays)
+
             if isinstance(data_list[0], dict):
                 # Ensure all dicts have same keys
                 keys = data_list[0].keys()
@@ -180,7 +215,6 @@ async def _execute_backtest_internal(
                         val = row.get(k)
                         # Basic handling of nested dicts (like exit_reason) -> JSON string
                         if isinstance(val, (dict, list)):
-                            import json
                             val = json.dumps(val)
                         arrays[k].append(val)
                 return pa.Table.from_pydict(arrays)
@@ -214,16 +248,22 @@ async def _execute_backtest_internal(
                 except Exception as e:
                     logger.error(f"Failed to downsample equity curve for preview: {e}")
 
-        # 2. report.msgpack.zstd
-        report_key = f"research/{strategy_id}/backtests/{backtest_id}/report.msgpack.zstd"
-        await storage_service.upload_payload(report_key, report_payload)
-        
-        import msgpack
-        artifact_size = len(msgpack.packb(report_payload, use_bin_type=True))
-        
-        # 3. workspace.tar.zstd
+        # Construct workspace tar and manifest
+        import json
+        manifest = {
+            "workspace_version": 3,
+            "engine_version": "2.1.0",
+            "schema_version": 3,
+            "generated_at": datetime.utcnow().isoformat() + "Z",
+            "strategy_run_id": backtest_id,
+            "datasets": []
+        }
+
         workspace_key = f"research/{strategy_id}/backtests/{backtest_id}/workspace.tar.zstd"
         tar_io = io.BytesIO()
+        
+        generated_metas = {}
+        
         with tarfile.open(fileobj=tar_io, mode='w') as tar:
             for ds_name, ds_data in dataset_payload.items():
                 try:
@@ -232,25 +272,92 @@ async def _execute_backtest_internal(
                     with pa.RecordBatchFileWriter(sink, tb.schema) as writer:
                         writer.write_table(tb)
                     buf = sink.getvalue()
-                    tarinfo = tarfile.TarInfo(name=f"{ds_name}.arrow")
+                    checksum = hashlib.sha256(buf).hexdigest()
+                    
+                    # Store inside datasets/ prefix
+                    path = f"datasets/{ds_name}.arrow"
+                    tarinfo = tarfile.TarInfo(name=path)
                     tarinfo.size = len(buf)
                     tar.addfile(tarinfo, io.BytesIO(buf))
+                    
+                    rows = tb.num_rows
+                    ds_meta = {
+                        "dataset_id": ds_name,
+                        "path": path,
+                        "format": "arrow",
+                        "compression": "zstd", # the whole tar is zstd, arrow is uncompressed inside
+                        "schema_version": 1,
+                        "rows": rows,
+                        "size_bytes": len(buf),
+                        "checksum": checksum
+                    }
+                    manifest["datasets"].append(ds_meta)
+                    generated_metas[ds_name] = ds_meta
+                    
                 except Exception as e:
                     logger.error(f"Failed to convert {ds_name} to Arrow: {e}")
+                    
+            # Add manifest.json
+            manifest_buf = json.dumps(manifest, indent=2).encode('utf-8')
+            tarinfo = tarfile.TarInfo(name="manifest.json")
+            tarinfo.size = len(manifest_buf)
+            tar.addfile(tarinfo, io.BytesIO(manifest_buf))
+            
+        # Enrich nested dataset references in report_payload["report"] in-place
+        def enrich_dataset_references(data, metas):
+            if isinstance(data, dict):
+                if "dataset_id" in data and data["dataset_id"] in metas:
+                    data.update(metas[data["dataset_id"]])
+                else:
+                    for k, v in data.items():
+                        enrich_dataset_references(v, metas)
+            elif isinstance(data, list):
+                for item in data:
+                    enrich_dataset_references(item, metas)
+
+        report_nested = report_payload.get("report", {})
+        enrich_dataset_references(report_nested, generated_metas)
+
+        # Validate that every DatasetReference in the report exists in manifest.json
+        def extract_dataset_ids(data, ids):
+            if isinstance(data, dict):
+                if "dataset_id" in data:
+                    ids.add(data["dataset_id"])
+                for v in data.values():
+                    extract_dataset_ids(v, ids)
+            elif isinstance(data, list):
+                for item in data:
+                    extract_dataset_ids(item, ids)
+
+        referenced_ids = set()
+        extract_dataset_ids(report_nested, referenced_ids)
+        referenced_ids = {rid for rid in referenced_ids if rid}
+
+        manifest_ids = {ds["dataset_id"] for ds in manifest["datasets"]}
+
+        missing_ids = referenced_ids - manifest_ids
+        if missing_ids:
+            raise ValueError(f"Workspace validation failed: Referenced dataset IDs {missing_ids} are missing from the manifest.")
+
+        # 2. report.msgpack.zstd
+        report_key = f"research/{strategy_id}/backtests/{backtest_id}/report.msgpack.zstd"
+        await storage_service.upload_payload(report_key, report_payload)
         
+        import msgpack
+        artifact_size = len(msgpack.packb(report_payload, use_bin_type=True))
+        
+        # 3. workspace.tar.zstd
         compressor = zstd.ZstdCompressor(level=3)
         workspace_buf = compressor.compress(tar_io.getvalue())
         await storage_service.upload_raw_payload(workspace_key, workspace_buf)
         artifact_size += len(workspace_buf)
         
-        # 4. runtime.arrow.zstd
-        runtime_events = run_dict.pop("runtime_events", [])
+        # 4. runtime.arrow.zstd  (already extracted from run_dict above)
         if runtime_events:
             runtime_key = f"research/{strategy_id}/backtests/{backtest_id}/runtime.arrow.zstd"
             await storage_service.upload_arrow_payload(runtime_key, to_table(runtime_events))
             
-        # 5. decision.arrow.zstd
-        decision_traces = run_dict.pop("decision_traces", [])
+        # 5. decision.arrow.zstd  (already extracted from run_dict above)
         if decision_traces:
             decision_key = f"research/{strategy_id}/backtests/{backtest_id}/decision.arrow.zstd"
             await storage_service.upload_arrow_payload(decision_key, to_table(decision_traces))
