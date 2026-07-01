@@ -23,12 +23,17 @@ class DeltaExchangeClient(BaseExchangeClient):
                     {
                         "name": "v2/ticker",
                         "symbols": self.symbols
+                    },
+                    {
+                        "name": "l2_updates",
+                        "symbols": self.symbols
                     }
                 ]
             }
         }
 
     def normalize_message(self, message: dict):
+        from decimal import Decimal
         # Delta trade message format handled in updates below
         msg_type = message.get("type")
         
@@ -64,6 +69,16 @@ class DeltaExchangeClient(BaseExchangeClient):
                 "mark_price": float(message.get("mark_price", 0)),
                 "volume_24h": float(message.get("volume_24h", 0)),
                 "timestamp": message.get("timestamp")
+            })
+            
+        if msg_type == "l2_updates":
+            return ("l2_updates", {
+                "exchange": "delta",
+                "symbol": message.get("symbol"),
+                "sequence": int(message.get("sequence_number", 0)),
+                "timestamp": int(message.get("timestamp", 0)),
+                "bids": [[Decimal(str(item[0])), Decimal(str(item[1]))] for item in message.get("bids", [])],
+                "asks": [[Decimal(str(item[0])), Decimal(str(item[1]))] for item in message.get("asks", [])]
             })
             
         return None

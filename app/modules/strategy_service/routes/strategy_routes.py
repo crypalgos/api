@@ -895,3 +895,84 @@ async def get_run_artifact(
     )
     return BaseResponseHandler.success_response(data=result, status_code=status_code)
 
+
+from app.modules.strategy_service.services.strategy_manager import strategy_manager
+from crypalgos_core.engine.context import ExecutionMode
+from pydantic import BaseModel
+
+class DeployRequest(BaseModel):
+    run_id: str
+    mode: str = "PAPER"
+    initial_capital: float = 10000.0
+    leverage: int = 1
+
+@strategy_router.post(
+    "/{strategy_id}/deploy",
+    dependencies=[Depends(security)],
+)
+async def deploy_strategy(
+    strategy_id: str,
+    payload: DeployRequest,
+    user: Annotated[dict, Depends(get_current_user)]
+) -> JSONResponse:
+    """Deploy a strategy class dynamically in PAPER or LIVE mode."""
+    mode_enum = ExecutionMode[payload.mode.upper()]
+    await strategy_manager.deploy(
+        strategy_id=strategy_id,
+        run_id=payload.run_id,
+        user_id=user["user_id"],
+        mode=mode_enum,
+        initial_capital=payload.initial_capital,
+        leverage=payload.leverage
+    )
+    return BaseResponseHandler.success_response(data={"message": "Strategy deployed successfully"}, status_code=200)
+
+@strategy_router.post(
+    "/runs/{run_id}/stop",
+    dependencies=[Depends(security)],
+)
+async def stop_run(
+    run_id: str,
+    user: Annotated[dict, Depends(get_current_user)]
+) -> JSONResponse:
+    """Stop a running strategy runner."""
+    await strategy_manager.stop(run_id)
+    return BaseResponseHandler.success_response(data={"message": "Strategy runner stopped successfully"}, status_code=200)
+
+@strategy_router.get(
+    "/runs/{run_id}/status",
+    dependencies=[Depends(security)],
+)
+async def get_run_status(
+    run_id: str,
+    user: Annotated[dict, Depends(get_current_user)]
+) -> JSONResponse:
+    """Get the running status and latest metrics of an active strategy runner."""
+    status = strategy_manager.get_status(run_id)
+    return BaseResponseHandler.success_response(data=status, status_code=200)
+
+
+from fastapi import WebSocket, WebSocketDisconnect
+from app.modules.strategy_service.services.websocket_manager import websocket_manager
+
+@strategy_router.websocket(
+    "/runs/{run_id}/ws"
+)
+async def strategy_run_websocket(
+    websocket: WebSocket,
+    run_id: str
+):
+    """Exposes real-time event updates stream for a running strategy session."""
+    await websocket_manager.connect(run_id, websocket)
+    try:
+        while True:
+            # Keep connection alive, listen for any client messages
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        websocket_manager.disconnect(run_id, websocket)
+    except Exception as e:
+        logger.error(f"WebSocket session error: {e}")
+        websocket_manager.disconnect(run_id, websocket)
+
+
+

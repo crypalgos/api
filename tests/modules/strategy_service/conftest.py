@@ -115,7 +115,7 @@ def sample_strategy() -> Strategy:
         name="Mock Quant Strategy",
         canvas_json={},
         compiled_code="""
-from crypalgos_core.runtime.strategy_base import StrategyBase
+from crypalgos_core.engine.strategy_base import StrategyBase
 class MyMockQuantStrategy(StrategyBase):
     datasources = {'btc': {'symbol': 'BTCUSD', 'leverage': 1, 'timeframes': ['1h']}}
     exchange = 'delta'

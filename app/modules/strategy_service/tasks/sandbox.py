@@ -166,8 +166,8 @@ logging.getLogger("BacktestingEngine.Simulator").setLevel(logging.ERROR)
 sys.path.insert(0, "/app")
 
 from crypalgos_data.exchanges.config import EXCHANGE_REGISTRY
-from crypalgos_core.runtime.simulator import EngineSimulator
-from crypalgos_core.runtime.strategy_base import StrategyBase
+from crypalgos_core.engine.simulator import EngineSimulator
+from crypalgos_core.engine.strategy_base import StrategyBase
 
 def run():
     with open("/sandbox/params.json", "r") as f:
@@ -184,7 +184,7 @@ def run():
         market_data = json.load(f)
 
     from crypalgos_core import database as db_mod
-    from crypalgos_core.runtime import simulator as sim_mod
+    from crypalgos_core.engine import simulator as sim_mod
 
     def mock_load_candles(exchange, symbol, start_date, end_date, timeframe="1m"):
         key = f"{exchange.lower()}_{symbol.upper()}_{timeframe.lower()}"

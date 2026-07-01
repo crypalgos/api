@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import AsyncGenerator
 
-from crypalgos_core.runtime.strategy_base import StrategyBase
+from crypalgos_core.engine.strategy_base import StrategyBase
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.connect_db import AsyncSessionLocal

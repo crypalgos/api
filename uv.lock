@@ -822,7 +822,7 @@ wheels = [
 [[package]]
 name = "crypalgos-core"
 version = "2.0.0"
-source = { git = "https://github.com/crypalgos/crypalgos_core.git?branch=master#9335572d2c8de6da59ec5591bcbbf460b096a27d" }
+source = { git = "https://github.com/crypalgos/crypalgos_core.git?branch=master#4645b872a87cfdc2824ff0067033559c6b2647ab" }
 dependencies = [
     { name = "clickhouse-connect" },
     { name = "crypalgos-data" },
@@ -832,6 +832,7 @@ dependencies = [
     { name = "pytest" },
     { name = "python-dateutil" },
     { name = "python-dotenv" },
+    { name = "zstandard" },
 ]
 
 [[package]]

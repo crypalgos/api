@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Any
 
 from crypalgos_data.exchanges.config import EXCHANGE_REGISTRY
-from crypalgos_core.runtime.simulator import EngineSimulator
+from crypalgos_core.engine.simulator import EngineSimulator
 
 from app.celery_app import celery_app
 from app.config.settings import settings
@@ -94,8 +94,6 @@ async def _execute_backtest_internal(
             logger.info(f"[DEV] Running backtest in-process for strategy {strategy_id} (version={strategy_version_id})")
 
 
-            from crypalgos_core.reporting.dataset_registry import DatasetRegistry
-            DatasetRegistry._store.clear()
 
             simulator = EngineSimulator(
                 exchange_config=EXCHANGE_REGISTRY.get(exchange_name, EXCHANGE_REGISTRY['delta'])(),
@@ -166,15 +164,12 @@ async def _execute_backtest_internal(
             "market_data": market_data_payload,
         }
         
-        from crypalgos_core.reporting.dataset_registry import DatasetRegistry, DatasetType
-        dataset_payload = dict(DatasetRegistry._store)
+        dataset_payload = {}
         dataset_payload["trades"] = trades
         dataset_payload["decision_traces"] = decision_traces
         dataset_payload["runtime_events"] = runtime_events
         dataset_payload["execution_logs"] = execution_logs
         dataset_payload["orders"] = orders
-        
-        DatasetRegistry.clear()
         
         # Build pyarrow tables
         import pyarrow as pa

@@ -121,12 +121,17 @@ async def favicon() -> RedirectResponse:
     return RedirectResponse(url="https://crypalgos.com/favicon.ico")
 
 
+from app.modules.user_service.routes.credential_routes import credential_router
+from app.modules.data_service.routes.market_routes import market_router
+
 # Include routers
 app.include_router(auth_router, prefix="/api/v1")
 app.include_router(session_router, prefix="/api/v1")
 app.include_router(user_router, prefix="/api/v1")
 app.include_router(contact_router, prefix="/api/v1")
 app.include_router(strategy_router, prefix="/api/v1")
+app.include_router(credential_router, prefix="/api/v1")
+app.include_router(market_router, prefix="/api/v1")
 
 # Setup Data Service
 from app.modules.data_service.manager import setup_data_service

@@ -10,10 +10,12 @@ from app.modules.user_service.models.session_model import Session
 from app.modules.user_service.models.user_model import User
 from app.modules.user_service.models.waitlist_model import Waitlist
 from app.modules.user_service.models.contact_model import ContactMessage
+from app.modules.user_service.models.credential_model import BrokerCredential, NotificationPreference, CredentialAuditLog  # noqa: F401
 from app.modules.strategy_service.models.strategy_model import Strategy  # noqa: F401
 from app.modules.strategy_service.models.research_run_model import ResearchRun, StrategyLatestResults  # noqa: F401
 from app.modules.strategy_service.models.strategy_version_model import StrategyVersion  # noqa: F401
 from app.modules.strategy_service.models.research_note_model import ResearchNote  # noqa: F401
+from app.modules.strategy_service.models.strategy_event_model import StrategyEvent  # noqa: F401
 
 
 

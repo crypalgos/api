@@ -4,7 +4,7 @@ from datetime import datetime
 from app.celery_app import celery_app
 from app.db.connect_db import AsyncSessionLocal
 from app.modules.strategy_service.tasks.task_utils import load_and_compile_strategy
-from crypalgos_core.runtime.simulator import EngineSimulator
+from crypalgos_core.engine.simulator import EngineSimulator
 from crypalgos_data.exchanges.config import EXCHANGE_REGISTRY
 from crypalgos_core.reporting.report_builder import build_analytics_report
 from crypalgos_core.reporting.context import AnalyticsContext

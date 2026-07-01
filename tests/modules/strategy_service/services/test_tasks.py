@@ -112,7 +112,7 @@ def test_ast_screening_valid_strategy() -> None:
     from app.modules.strategy_service.tasks.ast_validator import validate_strategy_ast
     
     code = """import numpy as np
-from crypalgos_core.runtime.strategy_base import StrategyBase
+from crypalgos_core.engine.strategy_base import StrategyBase
 
 class SimpleTrendStrategy(StrategyBase):
     def initialize(self) -> None:
@@ -130,7 +130,7 @@ def test_ast_screening_forbidden_imports() -> None:
     from app.modules.strategy_service.tasks.ast_validator import validate_strategy_ast
     
     code_with_os = """import os
-from crypalgos_core.runtime.strategy_base import StrategyBase
+from crypalgos_core.engine.strategy_base import StrategyBase
 
 class Exploit(StrategyBase):
     def initialize(self) -> None:
@@ -141,7 +141,7 @@ class Exploit(StrategyBase):
     assert "Import of 'os' is strictly forbidden." in str(exc_info.value)
 
     code_with_sys_from = """from sys import modules
-from crypalgos_core.runtime.strategy_base import StrategyBase
+from crypalgos_core.engine.strategy_base import StrategyBase
 
 class Exploit(StrategyBase):
     pass
@@ -155,7 +155,7 @@ def test_ast_screening_forbidden_calls() -> None:
     """Test that strategies with forbidden function calls are rejected."""
     from app.modules.strategy_service.tasks.ast_validator import validate_strategy_ast
     
-    code_with_eval = """from crypalgos_core.runtime.strategy_base import StrategyBase
+    code_with_eval = """from crypalgos_core.engine.strategy_base import StrategyBase
 
 class Exploit(StrategyBase):
     def on_data(self, data) -> None:
@@ -170,7 +170,7 @@ def test_ast_screening_dunder_attacks() -> None:
     """Test that strategies with double underscore attribute accesses are rejected."""
     from app.modules.strategy_service.tasks.ast_validator import validate_strategy_ast
     
-    code_with_dunder = """from crypalgos_core.runtime.strategy_base import StrategyBase
+    code_with_dunder = """from crypalgos_core.engine.strategy_base import StrategyBase
 
 class Exploit(StrategyBase):
     def on_data(self, data) -> None:
