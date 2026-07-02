@@ -183,7 +183,6 @@ def run():
     with open("/sandbox/market_data.json", "r") as f:
         market_data = json.load(f)
 
-    from crypalgos_core import database as db_mod
     from crypalgos_core.engine import simulator as sim_mod
 
     def mock_load_candles(exchange, symbol, start_date, end_date, timeframe="1m"):
@@ -220,7 +219,7 @@ def run():
         raise ValueError("No StrategyBase subclass resolved in strategy script.")
 
     simulator = EngineSimulator(
-            exchange_config=EXCHANGE_REGISTRY.get(compiled_dag.get('broker', 'delta'), EXCHANGE_REGISTRY['delta'])(),
+        exchange_config=EXCHANGE_REGISTRY.get(exchange.lower(), EXCHANGE_REGISTRY['delta'])(),
         initial_capital=initial_capital,
         leverage=leverage,
         slippage_rate=0.0002,
