@@ -61,10 +61,15 @@ async def _archive_async(self, run_id: str):
         )
         return
 
-    # Categorize events
-    trades = []
-    orders = []
-    equity = []
+    # Categorize events dynamically
+    EVENT_CATEGORY_MAPPING = {
+        "OrderFilledEvent": "trades",
+        "OrderSubmittedEvent": "orders",
+        "OrderAcceptedEvent": "orders",
+        "OrderCancelledEvent": "orders",
+    }
+
+    categorized = {"trades": [], "orders": []}
     manifest = {
         "workspace_schema": 1,
         "report_schema": 1,
@@ -75,16 +80,13 @@ async def _archive_async(self, run_id: str):
     }
 
     for ev in db_events:
-        payload = ev.payload
-        if ev.event_type == "OrderFilledEvent":
-            trades.append(payload)
-        elif ev.event_type in (
-            "OrderSubmittedEvent",
-            "OrderAcceptedEvent",
-            "OrderCancelledEvent",
-        ):
-            orders.append(payload)
-        # We can extract equity values if present, or write other states
+        category = EVENT_CATEGORY_MAPPING.get(ev.event_type)
+        if category:
+            categorized[category].append(ev.payload)
+
+    trades = categorized["trades"]
+    orders = categorized["orders"]
+    # We can extract equity values if present, or write other states
 
     # 2. Build pyarrow files
     trades_arrow = to_arrow_bytes(trades)

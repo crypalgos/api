@@ -175,3 +175,83 @@ async def job_lifecycle_context(
                     run.summary_json = summary
         # Re-raise so celery marks the task as failed
         raise e
+
+
+def to_table(data_list):
+    import pyarrow as pa
+    import json
+
+    if not data_list:
+        return pa.Table.from_arrays([pa.array([])], names=["empty"])
+
+    if isinstance(data_list, dict):
+        # Handle dictionaries (e.g. {"BTCUSD_ETHUSD": [[timestamp, value], ...]})
+        rows = []
+        for k, v in data_list.items():
+            if isinstance(v, list) and v and isinstance(v[0], list) and len(v[0]) == 2:
+                for row in v:
+                    rows.append({"key": k, "timestamp": row[0], "value": row[1]})
+            else:
+                rows.append(
+                    {
+                        "key": k,
+                        "value": (json.dumps(v) if isinstance(v, (dict, list)) else v),
+                    }
+                )
+
+        if rows and "timestamp" in rows[0]:
+            keys = ["key", "timestamp", "value"]
+        else:
+            keys = ["key", "value"]
+        arrays = {k: [] for k in keys}
+        for row in rows:
+            for k in keys:
+                arrays[k].append(row.get(k))
+        return pa.Table.from_pydict(arrays)
+
+    if isinstance(data_list[0], dict):
+        # Ensure all dicts have same keys
+        keys = data_list[0].keys()
+        arrays = {k: [] for k in keys}
+        for row in data_list:
+            for k in keys:
+                val = row.get(k)
+                if isinstance(val, (dict, list)):
+                    val = json.dumps(val)
+                arrays[k].append(val)
+        return pa.Table.from_pydict(arrays)
+    elif isinstance(data_list[0], list):
+        # Matrix (e.g. timestamps + values)
+        num_cols = len(data_list[0])
+        arrays = [[] for _ in range(num_cols)]
+        for row in data_list:
+            for i, val in enumerate(row):
+                arrays[i].append(val)
+        names = [f"col_{i}" for i in range(num_cols)]
+        if num_cols == 2:
+            names = ["timestamp", "value"]
+        return pa.Table.from_arrays([pa.array(a) for a in arrays], names=names)
+    return pa.Table.from_arrays([pa.array(data_list)], names=["value"])
+
+
+def enrich_dataset_references(data, metas):
+    if isinstance(data, dict):
+        if "dataset_id" in data and data["dataset_id"] in metas:
+            data.update(metas[data["dataset_id"]])
+        else:
+            for k, v in data.items():
+                enrich_dataset_references(v, metas)
+    elif isinstance(data, list):
+        for item in data:
+            enrich_dataset_references(item, metas)
+
+
+def extract_dataset_ids(data, ids):
+    if isinstance(data, dict):
+        if "dataset_id" in data:
+            ids.add(data["dataset_id"])
+        for v in data.values():
+            extract_dataset_ids(v, ids)
+    elif isinstance(data, list):
+        for item in data:
+            extract_dataset_ids(item, ids)

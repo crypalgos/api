@@ -209,71 +209,11 @@ async def _execute_backtest_internal(
         import pyarrow as pa
         import io, tarfile, hashlib
         import zstandard as zstd
-
-        # Convert dictionary to pyarrow table helper
-        def to_table(data_list):
-            if not data_list:
-                return pa.Table.from_arrays([pa.array([])], names=["empty"])
-            import json
-
-            if isinstance(data_list, dict):
-                # Handle dictionaries (e.g. {"BTCUSD_ETHUSD": [[timestamp, value], ...]})
-                rows = []
-                for k, v in data_list.items():
-                    if (
-                        isinstance(v, list)
-                        and v
-                        and isinstance(v[0], list)
-                        and len(v[0]) == 2
-                    ):
-                        for row in v:
-                            rows.append(
-                                {"key": k, "timestamp": row[0], "value": row[1]}
-                            )
-                    else:
-                        rows.append(
-                            {
-                                "key": k,
-                                "value": (
-                                    json.dumps(v) if isinstance(v, (dict, list)) else v
-                                ),
-                            }
-                        )
-
-                if rows and "timestamp" in rows[0]:
-                    keys = ["key", "timestamp", "value"]
-                else:
-                    keys = ["key", "value"]
-                arrays = {k: [] for k in keys}
-                for row in rows:
-                    for k in keys:
-                        arrays[k].append(row.get(k))
-                return pa.Table.from_pydict(arrays)
-
-            if isinstance(data_list[0], dict):
-                # Ensure all dicts have same keys
-                keys = data_list[0].keys()
-                arrays = {k: [] for k in keys}
-                for row in data_list:
-                    for k in keys:
-                        val = row.get(k)
-                        # Basic handling of nested dicts (like exit_reason) -> JSON string
-                        if isinstance(val, (dict, list)):
-                            val = json.dumps(val)
-                        arrays[k].append(val)
-                return pa.Table.from_pydict(arrays)
-            elif isinstance(data_list[0], list):
-                # Matrix (e.g. timestamps + values)
-                num_cols = len(data_list[0])
-                arrays = [[] for _ in range(num_cols)]
-                for row in data_list:
-                    for i, val in enumerate(row):
-                        arrays[i].append(val)
-                names = [f"col_{i}" for i in range(num_cols)]
-                if num_cols == 2:
-                    names = ["timestamp", "value"]
-                return pa.Table.from_arrays([pa.array(a) for a in arrays], names=names)
-            return pa.Table.from_arrays([pa.array(data_list)], names=["value"])
+        from app.modules.strategy_service.tasks.task_utils import (
+            to_table,
+            enrich_dataset_references,
+            extract_dataset_ids,
+        )
 
         # 1. metadata.msgpack.zstd
         metadata_key = (
@@ -355,32 +295,10 @@ async def _execute_backtest_internal(
             tarinfo.size = len(manifest_buf)
             tar.addfile(tarinfo, io.BytesIO(manifest_buf))
 
-        # Enrich nested dataset references in report_payload["report"] in-place
-        def enrich_dataset_references(data, metas):
-            if isinstance(data, dict):
-                if "dataset_id" in data and data["dataset_id"] in metas:
-                    data.update(metas[data["dataset_id"]])
-                else:
-                    for k, v in data.items():
-                        enrich_dataset_references(v, metas)
-            elif isinstance(data, list):
-                for item in data:
-                    enrich_dataset_references(item, metas)
-
         report_nested = report_payload.get("report", {})
         enrich_dataset_references(report_nested, generated_metas)
 
         # Validate that every DatasetReference in the report exists in manifest.json
-        def extract_dataset_ids(data, ids):
-            if isinstance(data, dict):
-                if "dataset_id" in data:
-                    ids.add(data["dataset_id"])
-                for v in data.values():
-                    extract_dataset_ids(v, ids)
-            elif isinstance(data, list):
-                for item in data:
-                    extract_dataset_ids(item, ids)
-
         referenced_ids = set()
         extract_dataset_ids(report_nested, referenced_ids)
         referenced_ids = {rid for rid in referenced_ids if rid}
