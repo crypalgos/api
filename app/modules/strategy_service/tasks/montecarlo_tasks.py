@@ -88,8 +88,9 @@ async def _execute_montecarlo_internal(
             "method": method,
             "random_seed": random_seed,
         }
+        from dataclasses import asdict
         report_payload = {
-            "report": report,
+            "report": asdict(report),
             "simulation_count": simulation_count,
         }
 
@@ -105,9 +106,9 @@ async def _execute_montecarlo_internal(
 
         # Build database summary (extract percentile/metrics from Monte Carlo report)
         summary_json = {
-            "median_drawdown": report.get("drawdown_distribution", {}).get("median"),
-            "worst_drawdown": report.get("drawdown_distribution", {}).get("worst"),
-            "probability_of_ruin": report.get("probability_of_ruin", 0.0),
+            "median_drawdown": float(report.summary.get("median_drawdown", 0.0)),
+            "worst_drawdown": float(report.summary.get("worst_drawdown", 0.0)),
+            "probability_of_ruin": float(report.summary.get("probability_of_ruin", 0.0)),
         }
 
         # Update DB

@@ -135,8 +135,9 @@ async def _execute_walkforward_internal(
             "window_config": window_config_json,
             "objective": objective,
         }
+        from dataclasses import asdict
         report_payload = {
-            "report": report,
+            "report": asdict(report),
             "windows_count": len(result.windows),
         }
 
@@ -150,16 +151,15 @@ async def _execute_walkforward_internal(
         await storage_service.upload_payload(metadata_key, meta_payload)
         await storage_service.upload_payload(report_key, report_payload)
 
-        # Build database summary (extract validation metrics from the walkforward report)
-        validation_metrics = report.get("validation_metrics", {})
+        # Build database summary (extract validation metrics from the walkforward report's aggregate_metrics)
         summary_json = {
-            "net_profit": validation_metrics.get("net_profit", 0.0),
-            "total_return_pct": validation_metrics.get("total_return_pct", 0.0),
-            "sharpe_ratio": validation_metrics.get("sharpe_ratio"),
-            "sortino_ratio": validation_metrics.get("sortino_ratio"),
-            "calmar_ratio": validation_metrics.get("calmar_ratio"),
-            "max_drawdown_pct": validation_metrics.get("max_drawdown_pct", 0.0),
-            "trade_count": validation_metrics.get("trade_count", 0),
+            "net_profit": float(report.aggregate_metrics.get("mean_net_profit", 0.0)),
+            "total_return_pct": float(report.aggregate_metrics.get("mean_total_return_pct", 0.0)),
+            "sharpe_ratio": float(report.aggregate_metrics.get("mean_sharpe_ratio", 0.0)) if report.aggregate_metrics.get("mean_sharpe_ratio") is not None else None,
+            "sortino_ratio": float(report.aggregate_metrics.get("mean_sortino_ratio", 0.0)) if report.aggregate_metrics.get("mean_sortino_ratio") is not None else None,
+            "calmar_ratio": float(report.aggregate_metrics.get("mean_calmar_ratio", 0.0)) if report.aggregate_metrics.get("mean_calmar_ratio") is not None else None,
+            "max_drawdown_pct": float(report.aggregate_metrics.get("mean_max_drawdown", 0.0)),
+            "trade_count": int(report.aggregate_metrics.get("mean_trade_count", 0)),
             "windows_count": len(result.windows),
         }
 
