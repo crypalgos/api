@@ -129,56 +129,44 @@ async def _execute_backtest_internal(
         from dataclasses import asdict
         from crypalgos_core.workspace.reporting_models import BacktestReport
 
-        if hasattr(report, "report"):
-            run_dict = asdict(report)
-            raw_metrics = run_dict["report"].get("metrics", {})
-            market_data_payload = run_dict.pop("market_data", [])
-            trades = run_dict.pop("trades", [])
-            # Pop these immediately so they never leak into the report artifact
-            runtime_events = run_dict.pop("runtime_events", [])
-            decision_traces = run_dict.pop("decision_traces", [])
-            execution_logs = run_dict.pop("execution_logs", [])
-            orders = run_dict.pop("orders", [])
-            report_payload = run_dict
+        run_dict = report
+        raw_metrics = run_dict.get("metrics", {})
+        market_data_payload = run_dict.pop("market_data", [])
+        trades_dict = run_dict.pop("trades", {})
+        trades = trades_dict.get("recent_trades", []) if isinstance(trades_dict, dict) else trades_dict
+        # Pop these immediately so they never leak into the report artifact
+        runtime_events = run_dict.pop("runtime_events", [])
+        decision_traces = run_dict.pop("decision_traces", [])
+        execution_logs = run_dict.pop("execution_logs", [])
+        orders = run_dict.pop("orders", [])
+        
+        # Enforce validation against BacktestReport dataclass
+        report_data = run_dict.get("report") if "report" in run_dict else run_dict
+        validated_report = BacktestReport(
+            schema_version=report_data.get("schema_version", "4.2"),
+            metrics=report_data.get("metrics", {}),
+            correlations=report_data.get("correlations", {}),
+            monthly=report_data.get("monthly", {}),
+            datasets=report_data.get("datasets", {}),
+            research_health=report_data.get("research_health", {}),
+            quality_score=report_data.get("quality_score", 100),
+            safety_recommendation=report_data.get("safety_recommendation", "APPROVED"),
+            warnings=report_data.get("warnings", []),
+            trade_audit=report_data.get("trade_audit", {}),
+            trade_concentration=report_data.get("trade_concentration", {}),
+            correlation_health=report_data.get("correlation_health", {}),
+            fractional_kelly=report_data.get("fractional_kelly", {}),
+            dataset_health=report_data.get("dataset_health", {}),
+            distribution_warnings=report_data.get("distribution_warnings", []),
+            anomaly_audit=report_data.get("anomaly_audit", {}),
+            research_observability=report_data.get("research_observability", {}),
+            equity_curve=report_data.get("equity_curve")
+        )
+        validated_dict = asdict(validated_report)
+        if "report" in run_dict:
+            report_payload = {**run_dict, "report": validated_dict}
         else:
-            run_dict = report
-            raw_metrics = run_dict.get("metrics", {})
-            market_data_payload = run_dict.pop("market_data", [])
-            trades_dict = run_dict.pop("trades", {})
-            trades = trades_dict.get("recent_trades", []) if isinstance(trades_dict, dict) else trades_dict
-            # Pop these immediately so they never leak into the report artifact
-            runtime_events = run_dict.pop("runtime_events", [])
-            decision_traces = run_dict.pop("decision_traces", [])
-            execution_logs = run_dict.pop("execution_logs", [])
-            orders = run_dict.pop("orders", [])
-            
-            # Enforce validation against BacktestReport dataclass
-            report_data = run_dict.get("report") if "report" in run_dict else run_dict
-            validated_report = BacktestReport(
-                schema_version=report_data.get("schema_version", "4.2"),
-                metrics=report_data.get("metrics", {}),
-                correlations=report_data.get("correlations", {}),
-                monthly=report_data.get("monthly", {}),
-                datasets=report_data.get("datasets", {}),
-                research_health=report_data.get("research_health", {}),
-                quality_score=report_data.get("quality_score", 100),
-                safety_recommendation=report_data.get("safety_recommendation", "APPROVED"),
-                warnings=report_data.get("warnings", []),
-                trade_audit=report_data.get("trade_audit", {}),
-                trade_concentration=report_data.get("trade_concentration", {}),
-                correlation_health=report_data.get("correlation_health", {}),
-                fractional_kelly=report_data.get("fractional_kelly", {}),
-                dataset_health=report_data.get("dataset_health", {}),
-                distribution_warnings=report_data.get("distribution_warnings", []),
-                anomaly_audit=report_data.get("anomaly_audit", {}),
-                research_observability=report_data.get("research_observability", {}),
-                equity_curve=report_data.get("equity_curve")
-            )
-            validated_dict = asdict(validated_report)
-            if "report" in run_dict:
-                report_payload = {**run_dict, "report": validated_dict}
-            else:
-                report_payload = validated_dict
+            report_payload = validated_dict
 
         g_metrics = raw_metrics.get("global", raw_metrics.get("global_metrics", raw_metrics))
 
