@@ -9,7 +9,7 @@ celery_app = Celery(
     "crypalgos_api",
     broker=REDIS_URL,
     backend=REDIS_URL,
-    include=["app.modules.strategy_service.tasks"]
+    include=["app.modules.strategy_service.tasks"],
 )
 
 # Celery performance and serialization configurations
@@ -20,5 +20,5 @@ celery_app.conf.update(
     timezone="UTC",
     enable_utc=True,
     task_track_started=True,
-    result_expires=3600  # expire results in 1 hour
+    result_expires=3600,  # expire results in 1 hour
 )

@@ -4,10 +4,17 @@ from pydantic import BaseModel, EmailStr, Field
 
 
 class ContactCreateSchema(BaseModel):
-    name: str = Field(..., min_length=2, max_length=50, description="Name of the person contacting us")
+    name: str = Field(
+        ..., min_length=2, max_length=50, description="Name of the person contacting us"
+    )
     email: EmailStr = Field(..., description="Email address of the sender")
-    subject: str | None = Field(None, max_length=150, description="Subject of the message")
-    message: str = Field(..., min_length=10, description="Content of the contact message")
+    subject: str | None = Field(
+        None, max_length=150, description="Subject of the message"
+    )
+    message: str = Field(
+        ..., min_length=10, description="Content of the contact message"
+    )
+
 
 class ContactResponseSchema(BaseModel):
     id: str = Field(..., description="Unique ID of the contact message")

@@ -5,10 +5,13 @@ from typing import Dict, Any, Type, Optional
 from crypalgos_core.engine.strategy_base import StrategyBase
 from crypalgos_core.engine.context import ExecutionMode
 from app.modules.strategy_service.runner import ExecutionRunner
-from app.modules.strategy_service.repositories.strategy_repository import StrategyRepository
+from app.modules.strategy_service.repositories.strategy_repository import (
+    StrategyRepository,
+)
 from app.db.connect_db import AsyncSessionLocal
 
 logger = logging.getLogger(__name__)
+
 
 class StrategyManager:
     def __init__(self):
@@ -19,12 +22,16 @@ class StrategyManager:
         namespace: Dict[str, Any] = {}
         # Execute the python code in the namespace dict
         exec(code_str, namespace)
-        
+
         # Find subclasses of StrategyBase
         for val in namespace.values():
-            if isinstance(val, type) and issubclass(val, StrategyBase) and val is not StrategyBase:
+            if (
+                isinstance(val, type)
+                and issubclass(val, StrategyBase)
+                and val is not StrategyBase
+            ):
                 return val
-                
+
         raise ValueError("No valid Strategy subclass found incompiled code.")
 
     async def deploy(
@@ -35,7 +42,7 @@ class StrategyManager:
         mode: ExecutionMode = ExecutionMode.PAPER,
         initial_capital: float = 10000.0,
         leverage: int = 1,
-        credential_id: Optional[str] = None
+        credential_id: Optional[str] = None,
     ) -> ExecutionRunner:
         if run_id in self.active_runners:
             raise ValueError(f"Strategy run {run_id} is already deployed and active.")
@@ -44,8 +51,10 @@ class StrategyManager:
             repo = StrategyRepository(session)
             strategy = await repo.get_by_user_and_id(user_id, strategy_id)
             if not strategy:
-                raise ValueError(f"Strategy {strategy_id} not found for user {user_id}.")
-                
+                raise ValueError(
+                    f"Strategy {strategy_id} not found for user {user_id}."
+                )
+
             code_str = strategy.compiled_code
             if not code_str:
                 raise ValueError("Strategy has no compiled script ready to execute.")
@@ -58,11 +67,18 @@ class StrategyManager:
         if mode == ExecutionMode.LIVE:
             if not credential_id:
                 raise ValueError("Live trading requires a valid credential_id.")
-            from app.modules.user_service.services.credential_service import credential_service
-            broker_creds = await credential_service.get_decrypted_broker_credential(credential_id)
+            from app.modules.user_service.services.credential_service import (
+                credential_service,
+            )
+
+            broker_creds = await credential_service.get_decrypted_broker_credential(
+                credential_id
+            )
             if not broker_creds:
-                raise ValueError(f"Active broker credentials for ID {credential_id} not found.")
-            
+                raise ValueError(
+                    f"Active broker credentials for ID {credential_id} not found."
+                )
+
             # Check target exchange matches strategy configuration
             # Strategy class typically has 'exchange' or similar attribute
             target_exchange = getattr(strat_class, "exchange", "delta")
@@ -79,7 +95,7 @@ class StrategyManager:
             mode=mode,
             initial_capital=initial_capital,
             leverage=leverage,
-            broker_credentials=broker_creds
+            broker_credentials=broker_creds,
         )
 
         self.active_runners[run_id] = runner
@@ -99,7 +115,10 @@ class StrategyManager:
 
         # Enqueue Celery S3 Archival task
         try:
-            from app.modules.strategy_service.tasks.archive_tasks import archive_strategy_run_task
+            from app.modules.strategy_service.tasks.archive_tasks import (
+                archive_strategy_run_task,
+            )
+
             archive_strategy_run_task.delay(run_id)
             logger.info(f"Enqueued S3 archival task for strategy run {run_id}")
         except Exception as e:
@@ -108,7 +127,7 @@ class StrategyManager:
     def get_status(self, run_id: str) -> Dict[str, Any]:
         if run_id not in self.active_runners:
             return {"status": "STOPPED"}
-            
+
         runner = self.active_runners[run_id]
         balances = runner.broker.get_balances()
         return {
@@ -116,8 +135,9 @@ class StrategyManager:
             "mode": runner.context.mode.name,
             "started_at": runner.context.started_at,
             "cash": balances.get("cash", 0.0),
-            "equity": balances.get("equity", 0.0)
+            "equity": balances.get("equity", 0.0),
         }
+
 
 # Global singleton
 strategy_manager = StrategyManager()

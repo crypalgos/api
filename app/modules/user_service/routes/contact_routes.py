@@ -22,7 +22,10 @@ logger = logging.getLogger(__name__)
 contact_router = APIRouter(prefix="/contact", tags=["Contact Management"])
 security = HTTPBearer()
 
-async def get_contact_service(session: AsyncSession = Depends(get_db)) -> ContactService:
+
+async def get_contact_service(
+    session: AsyncSession = Depends(get_db),
+) -> ContactService:
     """
     Dependency to get the ContactService instance.
     :param session: The database session.
@@ -30,6 +33,7 @@ async def get_contact_service(session: AsyncSession = Depends(get_db)) -> Contac
     """
     repository = ContactRepository(session)
     return ContactService(repository)
+
 
 @contact_router.post(
     "",
@@ -54,6 +58,7 @@ async def create_contact_message(
     logger.info(f"Contact message submission attempt from: {data.email}")
     status_code, result = await contact_service.create_message(data)
     return BaseResponseHandler.success_response(data=result, status_code=status_code)
+
 
 @contact_router.get(
     "",
@@ -82,6 +87,7 @@ async def get_contact_messages(
     logger.info("Admin retrieving contact messages")
     status_code, result = await contact_service.get_all_messages(offset, limit, query)
     return BaseResponseHandler.success_response(data=result, status_code=status_code)
+
 
 @contact_router.delete(
     "/{id}",

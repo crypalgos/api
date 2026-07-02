@@ -3,11 +3,12 @@ import zmq.asyncio
 import asyncio
 import json
 
+
 async def run_subscriber():
     context = zmq.asyncio.Context()
     socket = context.socket(zmq.SUB)
     socket.connect("ipc:///tmp/data_streamer.ipc")
-    socket.subscribe("") # Subscribe to all topics
+    socket.subscribe("")  # Subscribe to all topics
 
     print("ZMQ Subscriber started. Waiting for trade data...")
     try:
@@ -19,6 +20,7 @@ async def run_subscriber():
     finally:
         socket.close()
         context.term()
+
 
 if __name__ == "__main__":
     asyncio.run(run_subscriber())

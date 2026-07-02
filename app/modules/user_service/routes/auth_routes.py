@@ -65,8 +65,6 @@ def set_auth_cookies(response: Response, access_token: str, refresh_token: str) 
     )
 
 
-
-
 def clear_auth_cookies(response: Response) -> None:
     """Clear authentication cookies"""
     is_prod = settings.env == "production"
@@ -620,9 +618,13 @@ from app.modules.user_service.services.waitlist_service import WaitlistService
 
 bearer_security = HTTPBearer()
 
-async def get_waitlist_service(session: AsyncSession = Depends(get_db)) -> WaitlistService:
+
+async def get_waitlist_service(
+    session: AsyncSession = Depends(get_db),
+) -> WaitlistService:
     repository = WaitlistRepository(session)
     return WaitlistService(repository)
+
 
 @auth_router.post(
     "/waitlist",
@@ -644,6 +646,7 @@ async def join_waitlist(
     """Public endpoint to register for pre-launch waitlist"""
     status_code, result = await waitlist_service.join_waitlist(signup_data)
     return BaseResponseHandler.success_response(data=result, status_code=status_code)
+
 
 @auth_router.get(
     "/waitlist",
@@ -670,6 +673,7 @@ async def get_waitlist(
     status_code, result = await waitlist_service.get_all_waitlist(offset, limit, query)
     return BaseResponseHandler.success_response(data=result, status_code=status_code)
 
+
 @auth_router.delete(
     "/waitlist/{email}",
     dependencies=[Depends(bearer_security)],
@@ -692,4 +696,3 @@ async def delete_waitlist(
     """Admin-only endpoint to delete a waitlist subscriber by email"""
     status_code, result = await waitlist_service.delete_waitlist_by_email(email)
     return BaseResponseHandler.success_response(data=result, status_code=status_code)
-

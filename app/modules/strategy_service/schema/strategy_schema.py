@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field, model_validator
 # Shared Enums
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class JobStatus(str, Enum):
     PENDING = "PENDING"
     RUNNING = "RUNNING"
@@ -21,10 +22,12 @@ class JobStatus(str, Enum):
 # Strategy Schemas
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class StrategyCreateSchema(BaseModel):
     name: str
     description: Optional[str] = None
     canvas_json: Dict[str, Any]
+
 
 class StrategyResponseSchema(BaseModel):
     id: str
@@ -102,26 +105,31 @@ class StrategyVersionResponseSchema(BaseModel):
     is_golden: bool = False
     created_at: datetime
 
-
     class Config:
         from_attributes = True
 
+
 class SaveVersionRequestSchema(BaseModel):
     commit_message: Optional[str] = None
+
 
 class VersionDiffResponseSchema(BaseModel):
     diff_code: str
     canvas_changed: bool
 
+
 class UpdateVersionLabelRequestSchema(BaseModel):
     label: Optional[str] = None
+
 
 class UpdateVersionApprovalRequestSchema(BaseModel):
     approval_status: str
 
+
 class ResearchNoteCreateSchema(BaseModel):
     content: str
     run_id: Optional[str] = None
+
 
 class ResearchNoteResponseSchema(BaseModel):
     id: str
@@ -137,13 +145,14 @@ class ResearchNoteResponseSchema(BaseModel):
 class SaveCodeRequestSchema(BaseModel):
     code: str
 
+
 class UpdateCanvasRequestSchema(BaseModel):
     canvas_json: Dict[str, Any]
     name: Optional[str] = None
     description: Optional[str] = None
 
-class PaginatedStrategiesResponseSchema(BaseModel):
 
+class PaginatedStrategiesResponseSchema(BaseModel):
     total: int
     strategies: List[StrategyResponseSchema]
     current_page: int
@@ -151,10 +160,10 @@ class PaginatedStrategiesResponseSchema(BaseModel):
     total_pages: int
 
 
-
 # ─────────────────────────────────────────────────────────────────────────────
 # Trigger Request Schemas (Remain Specific to Each Engine Input)
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 class BacktestTriggerRequestSchema(BaseModel):
     start_date: datetime
@@ -164,23 +173,25 @@ class BacktestTriggerRequestSchema(BaseModel):
 
 class ParameterDefinitionSchema(BaseModel):
     name: str
-    type: str = "int"                       # "int", "float", "categorical", "bool"
+    type: str = "int"  # "int", "float", "categorical", "bool"
     min_val: Optional[float] = None
     max_val: Optional[float] = None
     step: Optional[float] = None
     choices: Optional[List[Any]] = None
 
+
 class ConstraintSchema(BaseModel):
     metric: str
-    operator: str                           # ">", "<", ">=", "<="
+    operator: str  # ">", "<", ">=", "<="
     value: float
+
 
 class OptimizationRequestSchema(BaseModel):
     start_date: datetime
     end_date: datetime
     parameter_space: List[ParameterDefinitionSchema] = Field(..., min_length=1)
     objective: str = "sharpe_ratio"
-    search_type: str = "grid"              # "grid" or "random"
+    search_type: str = "grid"  # "grid" or "random"
     max_runs: int = Field(default=500, ge=1, le=5000)
     constraints: Optional[List[ConstraintSchema]] = None
     initial_capital: float = 10000.0
@@ -196,19 +207,22 @@ class WalkForwardRequestSchema(BaseModel):
     parameter_space: List[ParameterDefinitionSchema] = Field(..., min_length=1)
     constraints: Optional[List[ConstraintSchema]] = None
     initial_capital: float = 10000.0
-    window_type: str = "rolling"            # "rolling" or "expanding"
+    window_type: str = "rolling"  # "rolling" or "expanding"
 
 
 class MonteCarloRequestSchema(BaseModel):
     source_backtest_id: str
     simulation_count: int = Field(default=10000, ge=100, le=100000)
-    method: str = "BOOTSTRAP"               # BOOTSTRAP, TRADE_SHUFFLE, RETURN_PERTURBATION, BLOCK_BOOTSTRAP
+    method: str = (
+        "BOOTSTRAP"  # BOOTSTRAP, TRADE_SHUFFLE, RETURN_PERTURBATION, BLOCK_BOOTSTRAP
+    )
     random_seed: Optional[int] = None
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Unified Research Run Responses
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 class ResearchRunResponseSchema(BaseModel):
     id: str
@@ -238,11 +252,13 @@ class ResearchRunResponseSchema(BaseModel):
         from_attributes = True
         populate_by_name = True
 
+
 class ResearchRunTriggerResponseSchema(BaseModel):
     run_id: str
     task_id: str
     status: str
     message: str
+
 
 class PaginatedResearchRunsResponseSchema(BaseModel):
     total: int
@@ -251,9 +267,11 @@ class PaginatedResearchRunsResponseSchema(BaseModel):
     limit: int
     total_pages: int
 
+
 class EditResearchRunRequestSchema(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
+
 
 class FavoriteResearchRunRequestSchema(BaseModel):
     is_favorite: bool
@@ -262,6 +280,7 @@ class FavoriteResearchRunRequestSchema(BaseModel):
 # ─────────────────────────────────────────────────────────────────────────────
 # Progress & Latest Results
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 class ResearchRunProgressResponseSchema(BaseModel):
     status: str

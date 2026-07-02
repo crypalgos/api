@@ -46,9 +46,6 @@ async def get_current_user(request: Request) -> dict[str, Any]:
         raise UnauthorizedAccessException("Authentication failed")
 
 
-
-
-
 # Alternative dependency using HTTPBearer for routes that need explicit token validation
 security = HTTPBearer()
 
@@ -61,4 +58,3 @@ async def get_admin_user(current_user: dict = Depends(get_current_user)) -> dict
     if current_user.get("email") != "ashishjangde54@gmail.com":
         raise UnauthorizedAccessException("Access denied. Admin only.")
     return current_user
-

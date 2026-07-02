@@ -11,8 +11,12 @@ from app.middlewares.auth_middleware import get_current_user
 from app.modules.strategy_service.routes.strategy_routes import get_strategy_service
 from app.modules.strategy_service.models.strategy_model import Strategy
 from app.modules.strategy_service.models.research_run_model import ResearchRun
-from app.modules.strategy_service.repositories.strategy_repository import StrategyRepository
-from app.modules.strategy_service.repositories.research_run_repository import ResearchRunRepository
+from app.modules.strategy_service.repositories.strategy_repository import (
+    StrategyRepository,
+)
+from app.modules.strategy_service.repositories.research_run_repository import (
+    ResearchRunRepository,
+)
 from app.modules.strategy_service.services.strategy_service import StrategyService
 from app.modules.strategy_service.schema.strategy_schema import StrategyResponseSchema
 from fastapi.testclient import TestClient
@@ -22,7 +26,6 @@ from fastapi.testclient import TestClient
 def client() -> TestClient:
     """Create a test client."""
     return TestClient(app)
-
 
 
 @pytest.fixture
@@ -85,6 +88,7 @@ def mock_strategy_service() -> MagicMock:
 @pytest.fixture
 def override_strategy_service(mock_strategy_service: MagicMock):
     """Override the strategy service dependency."""
+
     async def _get_strategy_service_override():
         return mock_strategy_service
 
@@ -97,6 +101,7 @@ def override_strategy_service(mock_strategy_service: MagicMock):
 @pytest.fixture
 def override_current_user():
     """Override the get_current_user dependency."""
+
     async def _get_current_user_override():
         return {"user_id": "test-user-id"}
 
@@ -126,5 +131,5 @@ class MyMockQuantStrategy(StrategyBase):
 """,
         is_code_modified=False,
         created_at=datetime.now(UTC),
-        updated_at=datetime.now(UTC)
+        updated_at=datetime.now(UTC),
     )

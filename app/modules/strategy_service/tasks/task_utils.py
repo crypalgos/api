@@ -26,9 +26,12 @@ async def load_and_compile_strategy(
         from app.modules.strategy_service.models.strategy_version_model import (
             StrategyVersion,
         )
+
         version = await session.get(StrategyVersion, strategy_version_id)
         if not version:
-            raise ValueError(f"StrategyVersion {strategy_version_id} not found in database.")
+            raise ValueError(
+                f"StrategyVersion {strategy_version_id} not found in database."
+            )
         compiled_script = version.compiled_code
     else:
         strategy = await session.get(Strategy, strategy_id)
@@ -43,16 +46,22 @@ async def load_and_compile_strategy(
         raise ValueError("Failed to create import spec for strategy.")
     module = importlib.util.module_from_spec(spec)
     exec(compile(compiled_script, "compiled_strategy", "exec"), module.__dict__)
-    
+
     strat_class = next(
-        (v for v in module.__dict__.values()
-         if isinstance(v, type) and issubclass(v, StrategyBase) and v is not StrategyBase),
-        None
+        (
+            v
+            for v in module.__dict__.values()
+            if isinstance(v, type)
+            and issubclass(v, StrategyBase)
+            and v is not StrategyBase
+        ),
+        None,
     )
     if not strat_class:
         raise ValueError("No compiled StrategyBase subclass found in strategy script.")
-        
+
     return strat_class
+
 
 from app.modules.strategy_service.models.research_run_model import ResearchRun
 
@@ -63,6 +72,7 @@ class AsyncProgressFlusher:
     The simulation loop calls `update(completed, total)` rapidly in a sync context.
     The `start_polling` asyncio task wakes up periodically and commits the latest values to the DB.
     """
+
     def __init__(self, run_id: str, run_type: str, flush_interval: float = 2.0):
         self.run_id = run_id
         self.run_type = run_type
@@ -82,10 +92,10 @@ class AsyncProgressFlusher:
     async def start_polling(self):
         while self._is_running:
             await asyncio.sleep(self.flush_interval)
-            
+
             c = self._completed
             t = self._total
-            
+
             # Only hit the DB if progress actually changed
             if c > self._last_flushed_completed and t > 0:
                 self._last_flushed_completed = c
@@ -93,13 +103,21 @@ class AsyncProgressFlusher:
                     percent = int((c / t) * 100)
                     progress_info = {"progress_percent": percent}
                     if self.run_type == "BACKTEST":
-                        progress_info.update({"processed_candles": c, "total_candles": t})
+                        progress_info.update(
+                            {"processed_candles": c, "total_candles": t}
+                        )
                     elif self.run_type == "OPTIMIZATION":
-                        progress_info.update({"completed_combinations": c, "total_combinations": t})
+                        progress_info.update(
+                            {"completed_combinations": c, "total_combinations": t}
+                        )
                     elif self.run_type == "WALKFORWARD":
-                        progress_info.update({"completed_windows": c, "total_windows": t})
+                        progress_info.update(
+                            {"completed_windows": c, "total_windows": t}
+                        )
                     elif self.run_type == "MONTECARLO":
-                        progress_info.update({"completed_simulations": c, "total_simulations": t})
+                        progress_info.update(
+                            {"completed_simulations": c, "total_simulations": t}
+                        )
 
                     async with AsyncSessionLocal() as session:
                         async with session.begin():
@@ -123,6 +141,7 @@ async def job_lifecycle_context(
     """
     # Dispose of inherited connection descriptors in child process prefork pools
     from app.db.connect_db import engine
+
     engine.sync_engine.dispose()
 
     logger.info(f"{task_name} started for run_id={run_id}")
@@ -138,7 +157,7 @@ async def job_lifecycle_context(
 
     try:
         yield  # Execute the core logic
-        
+
     except Exception as e:
         logger.error(f"{task_name} run {run_id} failed: {e}")
         err_msg = str(e)[:500]

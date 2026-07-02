@@ -48,17 +48,17 @@ logger = logging.getLogger(__name__)
 security = HTTPBearer()
 strategy_router = APIRouter(tags=["Strategies"])
 
+
 async def get_strategy_service(
-    session: AsyncSession = Depends(get_db)
+    session: AsyncSession = Depends(get_db),
 ) -> StrategyService:
-    return StrategyService(
-        StrategyRepository(session),
-        ResearchRunRepository(session)
-    )
+    return StrategyService(StrategyRepository(session), ResearchRunRepository(session))
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Strategies APIs
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 @strategy_router.post(
     "/strategies",
@@ -71,14 +71,14 @@ async def get_strategy_service(
 async def create_strategy(
     strategy_data: StrategyCreateSchema,
     user: Annotated[dict, Depends(get_current_user)],
-    strategy_service: StrategyService = Depends(get_strategy_service)
+    strategy_service: StrategyService = Depends(get_strategy_service),
 ) -> JSONResponse:
     """Create a new visual React Flow strategy canvas, auto-generating standard code base."""
     status_code, result = await strategy_service.create_strategy(
         user_id=user["user_id"],
         name=strategy_data.name,
         description=strategy_data.description,
-        canvas_json=strategy_data.canvas_json
+        canvas_json=strategy_data.canvas_json,
     )
     return BaseResponseHandler.success_response(data=result, status_code=status_code)
 
@@ -98,7 +98,7 @@ async def list_strategies(
     search: str = "",
     is_template: Optional[bool] = None,
     archived: bool = False,
-    strategy_service: StrategyService = Depends(get_strategy_service)
+    strategy_service: StrategyService = Depends(get_strategy_service),
 ) -> JSONResponse:
     """List saved strategies belonging to the authenticated user with pagination, filtering, and search."""
     status_code, result = await strategy_service.list_strategies(
@@ -107,7 +107,7 @@ async def list_strategies(
         limit=limit,
         search=search,
         is_template=is_template,
-        archived=archived
+        archived=archived,
     )
     return BaseResponseHandler.success_response(data=result, status_code=status_code)
 
@@ -124,10 +124,12 @@ async def list_strategies(
 async def get_strategy(
     strategy_id: str,
     user: Annotated[dict, Depends(get_current_user)],
-    strategy_service: StrategyService = Depends(get_strategy_service)
+    strategy_service: StrategyService = Depends(get_strategy_service),
 ) -> JSONResponse:
     """Fetch a specific visual strategy canvas."""
-    status_code, result = await strategy_service.get_strategy(user["user_id"], strategy_id)
+    status_code, result = await strategy_service.get_strategy(
+        user["user_id"], strategy_id
+    )
     return BaseResponseHandler.success_response(data=result, status_code=status_code)
 
 
@@ -144,7 +146,7 @@ async def update_canvas(
     strategy_id: str,
     canvas_data: UpdateCanvasRequestSchema,
     user: Annotated[dict, Depends(get_current_user)],
-    strategy_service: StrategyService = Depends(get_strategy_service)
+    strategy_service: StrategyService = Depends(get_strategy_service),
 ) -> JSONResponse:
     """Save the visual canvas node/edge graph and recompile it to Python strategy code."""
     status_code, result = await strategy_service.update_canvas(
@@ -152,7 +154,7 @@ async def update_canvas(
         strategy_id=strategy_id,
         canvas_json=canvas_data.canvas_json,
         name=canvas_data.name,
-        description=canvas_data.description
+        description=canvas_data.description,
     )
     return BaseResponseHandler.success_response(data=result, status_code=status_code)
 
@@ -170,13 +172,11 @@ async def save_monaco_code(
     strategy_id: str,
     code_data: SaveCodeRequestSchema,
     user: Annotated[dict, Depends(get_current_user)],
-    strategy_service: StrategyService = Depends(get_strategy_service)
+    strategy_service: StrategyService = Depends(get_strategy_service),
 ) -> JSONResponse:
     """Overwrite standard compiled code with custom user edits inside Monaco editor."""
     status_code, result = await strategy_service.save_custom_code(
-        user_id=user["user_id"],
-        strategy_id=strategy_id,
-        code=code_data.code
+        user_id=user["user_id"], strategy_id=strategy_id, code=code_data.code
     )
     return BaseResponseHandler.success_response(data=result, status_code=status_code)
 
@@ -193,10 +193,12 @@ async def save_monaco_code(
 async def reset_builder(
     strategy_id: str,
     user: Annotated[dict, Depends(get_current_user)],
-    strategy_service: StrategyService = Depends(get_strategy_service)
+    strategy_service: StrategyService = Depends(get_strategy_service),
 ) -> JSONResponse:
     """Reset custom Monaco code changes and re-compile from visual canvas DAG layout."""
-    status_code, result = await strategy_service.reset_to_visual_builder(user["user_id"], strategy_id)
+    status_code, result = await strategy_service.reset_to_visual_builder(
+        user["user_id"], strategy_id
+    )
     return BaseResponseHandler.success_response(data=result, status_code=status_code)
 
 
@@ -212,10 +214,12 @@ async def reset_builder(
 async def delete_strategy(
     strategy_id: str,
     user: Annotated[dict, Depends(get_current_user)],
-    strategy_service: StrategyService = Depends(get_strategy_service)
+    strategy_service: StrategyService = Depends(get_strategy_service),
 ) -> JSONResponse:
     """Archive a visual strategy canvas owned by the authenticated user."""
-    status_code, result = await strategy_service.delete_strategy(user["user_id"], strategy_id)
+    status_code, result = await strategy_service.delete_strategy(
+        user["user_id"], strategy_id
+    )
     return BaseResponseHandler.success_response(data=result, status_code=status_code)
 
 
@@ -231,16 +235,19 @@ async def delete_strategy(
 async def restore_strategy(
     strategy_id: str,
     user: Annotated[dict, Depends(get_current_user)],
-    strategy_service: StrategyService = Depends(get_strategy_service)
+    strategy_service: StrategyService = Depends(get_strategy_service),
 ) -> JSONResponse:
     """Restore/unarchive a strategy from soft delete."""
-    status_code, result = await strategy_service.restore_strategy(user["user_id"], strategy_id)
+    status_code, result = await strategy_service.restore_strategy(
+        user["user_id"], strategy_id
+    )
     return BaseResponseHandler.success_response(data=result, status_code=status_code)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Strategy Versioning APIs
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 @strategy_router.post(
     "/strategies/{strategy_id}/versions",
@@ -255,7 +262,7 @@ async def save_strategy_version(
     strategy_id: str,
     payload: SaveVersionRequestSchema,
     user: Annotated[dict, Depends(get_current_user)],
-    strategy_service: StrategyService = Depends(get_strategy_service)
+    strategy_service: StrategyService = Depends(get_strategy_service),
 ) -> JSONResponse:
     """Manually save a snapshot version of the strategy draft."""
     status_code, result = await strategy_service.save_version(
@@ -276,10 +283,12 @@ async def save_strategy_version(
 async def list_strategy_versions(
     strategy_id: str,
     user: Annotated[dict, Depends(get_current_user)],
-    strategy_service: StrategyService = Depends(get_strategy_service)
+    strategy_service: StrategyService = Depends(get_strategy_service),
 ) -> JSONResponse:
     """List version history of a strategy."""
-    status_code, result = await strategy_service.list_versions(user["user_id"], strategy_id)
+    status_code, result = await strategy_service.list_versions(
+        user["user_id"], strategy_id
+    )
     return BaseResponseHandler.success_response(data=result, status_code=status_code)
 
 
@@ -296,10 +305,12 @@ async def get_strategy_version(
     strategy_id: str,
     version: int,
     user: Annotated[dict, Depends(get_current_user)],
-    strategy_service: StrategyService = Depends(get_strategy_service)
+    strategy_service: StrategyService = Depends(get_strategy_service),
 ) -> JSONResponse:
     """Fetch details of a specific strategy version."""
-    status_code, result = await strategy_service.get_version(user["user_id"], strategy_id, version)
+    status_code, result = await strategy_service.get_version(
+        user["user_id"], strategy_id, version
+    )
     return BaseResponseHandler.success_response(data=result, status_code=status_code)
 
 
@@ -316,10 +327,12 @@ async def restore_strategy_version(
     strategy_id: str,
     version: int,
     user: Annotated[dict, Depends(get_current_user)],
-    strategy_service: StrategyService = Depends(get_strategy_service)
+    strategy_service: StrategyService = Depends(get_strategy_service),
 ) -> JSONResponse:
     """Restore a historical version snapshot into the current draft."""
-    status_code, result = await strategy_service.restore_version(user["user_id"], strategy_id, version)
+    status_code, result = await strategy_service.restore_version(
+        user["user_id"], strategy_id, version
+    )
     return BaseResponseHandler.success_response(data=result, status_code=status_code)
 
 
@@ -336,10 +349,12 @@ async def diff_strategy_version(
     strategy_id: str,
     version: int,
     user: Annotated[dict, Depends(get_current_user)],
-    strategy_service: StrategyService = Depends(get_strategy_service)
+    strategy_service: StrategyService = Depends(get_strategy_service),
 ) -> JSONResponse:
     """Compare a version snapshot against the current draft."""
-    status_code, result = await strategy_service.diff_version(user["user_id"], strategy_id, version)
+    status_code, result = await strategy_service.diff_version(
+        user["user_id"], strategy_id, version
+    )
     return BaseResponseHandler.success_response(data=result, status_code=status_code)
 
 
@@ -357,7 +372,7 @@ async def update_strategy_version_label(
     version: int,
     payload: UpdateVersionLabelRequestSchema,
     user: Annotated[dict, Depends(get_current_user)],
-    strategy_service: StrategyService = Depends(get_strategy_service)
+    strategy_service: StrategyService = Depends(get_strategy_service),
 ) -> JSONResponse:
     """Update label of a specific strategy version snapshot."""
     status_code, result = await strategy_service.update_version_label(
@@ -380,7 +395,7 @@ async def update_strategy_version_approval(
     version: int,
     payload: UpdateVersionApprovalRequestSchema,
     user: Annotated[dict, Depends(get_current_user)],
-    strategy_service: StrategyService = Depends(get_strategy_service)
+    strategy_service: StrategyService = Depends(get_strategy_service),
 ) -> JSONResponse:
     """Update approval status of a specific strategy version snapshot."""
     status_code, result = await strategy_service.update_version_approval(
@@ -402,7 +417,7 @@ async def set_strategy_golden_version(
     strategy_id: str,
     version: int,
     user: Annotated[dict, Depends(get_current_user)],
-    strategy_service: StrategyService = Depends(get_strategy_service)
+    strategy_service: StrategyService = Depends(get_strategy_service),
 ) -> JSONResponse:
     """Set a historical version snapshot as the golden candidate for the strategy."""
     status_code, result = await strategy_service.set_golden_version(
@@ -424,7 +439,7 @@ async def create_strategy_research_note(
     strategy_id: str,
     payload: ResearchNoteCreateSchema,
     user: Annotated[dict, Depends(get_current_user)],
-    strategy_service: StrategyService = Depends(get_strategy_service)
+    strategy_service: StrategyService = Depends(get_strategy_service),
 ) -> JSONResponse:
     """Create a new research note for a strategy (optionally linked to a run)."""
     status_code, result = await strategy_service.create_research_note(
@@ -445,10 +460,12 @@ async def create_strategy_research_note(
 async def list_strategy_research_notes(
     strategy_id: str,
     user: Annotated[dict, Depends(get_current_user)],
-    strategy_service: StrategyService = Depends(get_strategy_service)
+    strategy_service: StrategyService = Depends(get_strategy_service),
 ) -> JSONResponse:
     """List all research notes for a strategy."""
-    status_code, result = await strategy_service.list_strategy_notes(user["user_id"], strategy_id)
+    status_code, result = await strategy_service.list_strategy_notes(
+        user["user_id"], strategy_id
+    )
     return BaseResponseHandler.success_response(data=result, status_code=status_code)
 
 
@@ -465,17 +482,18 @@ async def list_run_research_notes(
     strategy_id: str,
     run_id: str,
     user: Annotated[dict, Depends(get_current_user)],
-    strategy_service: StrategyService = Depends(get_strategy_service)
+    strategy_service: StrategyService = Depends(get_strategy_service),
 ) -> JSONResponse:
     """List all research notes for a specific run."""
-    status_code, result = await strategy_service.list_run_notes(user["user_id"], strategy_id, run_id)
+    status_code, result = await strategy_service.list_run_notes(
+        user["user_id"], strategy_id, run_id
+    )
     return BaseResponseHandler.success_response(data=result, status_code=status_code)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Research Runs APIs
 # ─────────────────────────────────────────────────────────────────────────────
-
 
 
 @strategy_router.post(
@@ -490,7 +508,7 @@ async def trigger_backtest(
     strategy_id: str,
     data: BacktestTriggerRequestSchema,
     user: Annotated[dict, Depends(get_current_user)],
-    strategy_service: StrategyService = Depends(get_strategy_service)
+    strategy_service: StrategyService = Depends(get_strategy_service),
 ) -> JSONResponse:
     """Trigger a backtest task run."""
     status_code, result = await strategy_service.trigger_backtest(
@@ -498,7 +516,7 @@ async def trigger_backtest(
         strategy_id=strategy_id,
         start_date=data.start_date,
         end_date=data.end_date,
-        initial_capital=data.initial_capital
+        initial_capital=data.initial_capital,
     )
     return BaseResponseHandler.success_response(data=result, status_code=status_code)
 
@@ -515,7 +533,7 @@ async def trigger_optimization(
     strategy_id: str,
     data: OptimizationRequestSchema,
     user: Annotated[dict, Depends(get_current_user)],
-    strategy_service: StrategyService = Depends(get_strategy_service)
+    strategy_service: StrategyService = Depends(get_strategy_service),
 ) -> JSONResponse:
     """Trigger a parameter space optimization run."""
     status_code, result = await strategy_service.trigger_optimization(
@@ -545,7 +563,7 @@ async def trigger_walkforward(
     strategy_id: str,
     data: WalkForwardRequestSchema,
     user: Annotated[dict, Depends(get_current_user)],
-    strategy_service: StrategyService = Depends(get_strategy_service)
+    strategy_service: StrategyService = Depends(get_strategy_service),
 ) -> JSONResponse:
     """Trigger a walkforward validation run."""
     status_code, result = await strategy_service.trigger_walkforward(
@@ -577,7 +595,7 @@ async def trigger_montecarlo(
     strategy_id: str,
     data: MonteCarloRequestSchema,
     user: Annotated[dict, Depends(get_current_user)],
-    strategy_service: StrategyService = Depends(get_strategy_service)
+    strategy_service: StrategyService = Depends(get_strategy_service),
 ) -> JSONResponse:
     """Trigger a Monte Carlo robustness run."""
     status_code, result = await strategy_service.trigger_montecarlo(
@@ -586,7 +604,7 @@ async def trigger_montecarlo(
         source_backtest_id=data.source_backtest_id,
         simulation_count=data.simulation_count,
         method=data.method,
-        random_seed=data.random_seed
+        random_seed=data.random_seed,
     )
     return BaseResponseHandler.success_response(data=result, status_code=status_code)
 
@@ -594,6 +612,7 @@ async def trigger_montecarlo(
 # ─────────────────────────────────────────────────────────────────────────────
 # Listing & specific run getters
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 @strategy_router.get(
     "/strategies/{strategy_id}/backtests",
@@ -610,12 +629,18 @@ async def list_backtests(
     sort_by: str = "updated_at",
     page: int = 1,
     limit: int = 8,
-    strategy_service: StrategyService = Depends(get_strategy_service)
+    strategy_service: StrategyService = Depends(get_strategy_service),
 ) -> JSONResponse:
     """List historical backtests for a strategy."""
     status_code, result = await strategy_service.list_runs(
-        user_id=user["user_id"], strategy_id=strategy_id, run_type="BACKTEST",
-        status=status, is_favorite=is_favorite, sort_by=sort_by, page=page, limit=limit
+        user_id=user["user_id"],
+        strategy_id=strategy_id,
+        run_type="BACKTEST",
+        status=status,
+        is_favorite=is_favorite,
+        sort_by=sort_by,
+        page=page,
+        limit=limit,
     )
     return BaseResponseHandler.success_response(data=result, status_code=status_code)
 
@@ -635,12 +660,18 @@ async def list_optimizations(
     sort_by: str = "updated_at",
     page: int = 1,
     limit: int = 8,
-    strategy_service: StrategyService = Depends(get_strategy_service)
+    strategy_service: StrategyService = Depends(get_strategy_service),
 ) -> JSONResponse:
     """List parameter optimizations for a strategy."""
     status_code, result = await strategy_service.list_runs(
-        user_id=user["user_id"], strategy_id=strategy_id, run_type="OPTIMIZATION",
-        status=status, is_favorite=is_favorite, sort_by=sort_by, page=page, limit=limit
+        user_id=user["user_id"],
+        strategy_id=strategy_id,
+        run_type="OPTIMIZATION",
+        status=status,
+        is_favorite=is_favorite,
+        sort_by=sort_by,
+        page=page,
+        limit=limit,
     )
     return BaseResponseHandler.success_response(data=result, status_code=status_code)
 
@@ -660,12 +691,18 @@ async def list_walkforwards(
     sort_by: str = "updated_at",
     page: int = 1,
     limit: int = 8,
-    strategy_service: StrategyService = Depends(get_strategy_service)
+    strategy_service: StrategyService = Depends(get_strategy_service),
 ) -> JSONResponse:
     """List walkforward runs for a strategy."""
     status_code, result = await strategy_service.list_runs(
-        user_id=user["user_id"], strategy_id=strategy_id, run_type="WALKFORWARD",
-        status=status, is_favorite=is_favorite, sort_by=sort_by, page=page, limit=limit
+        user_id=user["user_id"],
+        strategy_id=strategy_id,
+        run_type="WALKFORWARD",
+        status=status,
+        is_favorite=is_favorite,
+        sort_by=sort_by,
+        page=page,
+        limit=limit,
     )
     return BaseResponseHandler.success_response(data=result, status_code=status_code)
 
@@ -685,12 +722,18 @@ async def list_montecarlos(
     sort_by: str = "updated_at",
     page: int = 1,
     limit: int = 8,
-    strategy_service: StrategyService = Depends(get_strategy_service)
+    strategy_service: StrategyService = Depends(get_strategy_service),
 ) -> JSONResponse:
     """List Monte Carlo runs for a strategy."""
     status_code, result = await strategy_service.list_runs(
-        user_id=user["user_id"], strategy_id=strategy_id, run_type="MONTECARLO",
-        status=status, is_favorite=is_favorite, sort_by=sort_by, page=page, limit=limit
+        user_id=user["user_id"],
+        strategy_id=strategy_id,
+        run_type="MONTECARLO",
+        status=status,
+        is_favorite=is_favorite,
+        sort_by=sort_by,
+        page=page,
+        limit=limit,
     )
     return BaseResponseHandler.success_response(data=result, status_code=status_code)
 
@@ -703,10 +746,12 @@ async def get_backtest(
     strategy_id: str,
     backtest_id: str,
     user: Annotated[dict, Depends(get_current_user)],
-    strategy_service: StrategyService = Depends(get_strategy_service)
+    strategy_service: StrategyService = Depends(get_strategy_service),
 ) -> JSONResponse:
     """Get detailed backtest run (metadata + report payload from storage)."""
-    status_code, result = await strategy_service.get_run(user["user_id"], strategy_id, backtest_id)
+    status_code, result = await strategy_service.get_run(
+        user["user_id"], strategy_id, backtest_id
+    )
     return BaseResponseHandler.success_response(data=result, status_code=status_code)
 
 
@@ -718,10 +763,12 @@ async def get_optimization(
     strategy_id: str,
     optimization_id: str,
     user: Annotated[dict, Depends(get_current_user)],
-    strategy_service: StrategyService = Depends(get_strategy_service)
+    strategy_service: StrategyService = Depends(get_strategy_service),
 ) -> JSONResponse:
     """Get detailed optimization run (metadata + report payload)."""
-    status_code, result = await strategy_service.get_run(user["user_id"], strategy_id, optimization_id)
+    status_code, result = await strategy_service.get_run(
+        user["user_id"], strategy_id, optimization_id
+    )
     return BaseResponseHandler.success_response(data=result, status_code=status_code)
 
 
@@ -733,10 +780,12 @@ async def get_walkforward(
     strategy_id: str,
     walkforward_id: str,
     user: Annotated[dict, Depends(get_current_user)],
-    strategy_service: StrategyService = Depends(get_strategy_service)
+    strategy_service: StrategyService = Depends(get_strategy_service),
 ) -> JSONResponse:
     """Get detailed walkforward run (metadata + report payload)."""
-    status_code, result = await strategy_service.get_run(user["user_id"], strategy_id, walkforward_id)
+    status_code, result = await strategy_service.get_run(
+        user["user_id"], strategy_id, walkforward_id
+    )
     return BaseResponseHandler.success_response(data=result, status_code=status_code)
 
 
@@ -748,16 +797,19 @@ async def get_montecarlo(
     strategy_id: str,
     montecarlo_id: str,
     user: Annotated[dict, Depends(get_current_user)],
-    strategy_service: StrategyService = Depends(get_strategy_service)
+    strategy_service: StrategyService = Depends(get_strategy_service),
 ) -> JSONResponse:
     """Get detailed Monte Carlo run (metadata + report payload)."""
-    status_code, result = await strategy_service.get_run(user["user_id"], strategy_id, montecarlo_id)
+    status_code, result = await strategy_service.get_run(
+        user["user_id"], strategy_id, montecarlo_id
+    )
     return BaseResponseHandler.success_response(data=result, status_code=status_code)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # General Run Operations (Rename, Favorites, Delete, Progress, Latest, Charting)
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 @strategy_router.patch(
     "/research-runs/{run_id}",
@@ -770,11 +822,14 @@ async def rename_run(
     run_id: str,
     data: EditResearchRunRequestSchema,
     user: Annotated[dict, Depends(get_current_user)],
-    strategy_service: StrategyService = Depends(get_strategy_service)
+    strategy_service: StrategyService = Depends(get_strategy_service),
 ) -> JSONResponse:
     """Edit a run's name and/or description."""
     status_code, result = await strategy_service.edit_run(
-        user_id=user["user_id"], run_id=run_id, name=data.name, description=data.description
+        user_id=user["user_id"],
+        run_id=run_id,
+        name=data.name,
+        description=data.description,
     )
     return BaseResponseHandler.success_response(data=result, status_code=status_code)
 
@@ -790,7 +845,7 @@ async def favorite_run(
     run_id: str,
     data: FavoriteResearchRunRequestSchema,
     user: Annotated[dict, Depends(get_current_user)],
-    strategy_service: StrategyService = Depends(get_strategy_service)
+    strategy_service: StrategyService = Depends(get_strategy_service),
 ) -> JSONResponse:
     """Toggle favorite status of a run."""
     status_code, result = await strategy_service.toggle_run_favorite(
@@ -806,7 +861,7 @@ async def favorite_run(
 async def delete_run(
     run_id: str,
     user: Annotated[dict, Depends(get_current_user)],
-    strategy_service: StrategyService = Depends(get_strategy_service)
+    strategy_service: StrategyService = Depends(get_strategy_service),
 ) -> JSONResponse:
     """Delete a run from PostgreSQL database and clear its compressed msgpack payloads from storage."""
     status_code, result = await strategy_service.delete_run(user["user_id"], run_id)
@@ -823,10 +878,12 @@ async def delete_run(
 async def get_run_progress(
     run_id: str,
     user: Annotated[dict, Depends(get_current_user)],
-    strategy_service: StrategyService = Depends(get_strategy_service)
+    strategy_service: StrategyService = Depends(get_strategy_service),
 ) -> JSONResponse:
     """Fetch real-time active task progress metrics."""
-    status_code, result = await strategy_service.get_run_progress(user["user_id"], run_id)
+    status_code, result = await strategy_service.get_run_progress(
+        user["user_id"], run_id
+    )
     return BaseResponseHandler.success_response(data=result, status_code=status_code)
 
 
@@ -838,7 +895,7 @@ async def get_latest_run(
     strategy_id: str,
     run_type: str,
     user: Annotated[dict, Depends(get_current_user)],
-    strategy_service: StrategyService = Depends(get_strategy_service)
+    strategy_service: StrategyService = Depends(get_strategy_service),
 ) -> JSONResponse:
     """Load latest run results directly from latest/ object folder in S3."""
     status_code, result = await strategy_service.get_latest_run(
@@ -856,7 +913,7 @@ async def get_latest_run(
 )
 async def get_templates(
     user: Annotated[dict, Depends(get_current_user)],
-    strategy_service: StrategyService = Depends(get_strategy_service)
+    strategy_service: StrategyService = Depends(get_strategy_service),
 ) -> JSONResponse:
     """Fetch strategy templates library with pre-loaded latest results mapping summaries (no S3 scanning)."""
     status_code, result = await strategy_service.get_template_library(user["user_id"])
@@ -871,13 +928,14 @@ async def get_run_dataset_chart(
     run_id: str,
     dataset_name: str,
     user: Annotated[dict, Depends(get_current_user)],
-    strategy_service: StrategyService = Depends(get_strategy_service)
+    strategy_service: StrategyService = Depends(get_strategy_service),
 ) -> JSONResponse:
     """Download the heavy dataset payload from storage and extract specific chart curves."""
     status_code, result = await strategy_service.get_run_dataset_chart(
         user["user_id"], run_id=run_id, dataset_name=dataset_name
     )
     return BaseResponseHandler.success_response(data=result, status_code=status_code)
+
 
 @strategy_router.get(
     "/research-runs/{run_id}/artifacts/{artifact_type}",
@@ -887,7 +945,7 @@ async def get_run_artifact(
     run_id: str,
     artifact_type: str,
     user: Annotated[dict, Depends(get_current_user)],
-    strategy_service: StrategyService = Depends(get_strategy_service)
+    strategy_service: StrategyService = Depends(get_strategy_service),
 ) -> JSONResponse:
     """Download a specific artifact for a run."""
     status_code, result = await strategy_service.get_run_artifact(
@@ -900,11 +958,13 @@ from app.modules.strategy_service.services.strategy_manager import strategy_mana
 from crypalgos_core.engine.context import ExecutionMode
 from pydantic import BaseModel
 
+
 class DeployRequest(BaseModel):
     run_id: str
     mode: str = "PAPER"
     initial_capital: float = 10000.0
     leverage: int = 1
+
 
 @strategy_router.post(
     "/{strategy_id}/deploy",
@@ -913,7 +973,7 @@ class DeployRequest(BaseModel):
 async def deploy_strategy(
     strategy_id: str,
     payload: DeployRequest,
-    user: Annotated[dict, Depends(get_current_user)]
+    user: Annotated[dict, Depends(get_current_user)],
 ) -> JSONResponse:
     """Deploy a strategy class dynamically in PAPER or LIVE mode."""
     mode_enum = ExecutionMode[payload.mode.upper()]
@@ -923,29 +983,33 @@ async def deploy_strategy(
         user_id=user["user_id"],
         mode=mode_enum,
         initial_capital=payload.initial_capital,
-        leverage=payload.leverage
+        leverage=payload.leverage,
     )
-    return BaseResponseHandler.success_response(data={"message": "Strategy deployed successfully"}, status_code=200)
+    return BaseResponseHandler.success_response(
+        data={"message": "Strategy deployed successfully"}, status_code=200
+    )
+
 
 @strategy_router.post(
     "/runs/{run_id}/stop",
     dependencies=[Depends(security)],
 )
 async def stop_run(
-    run_id: str,
-    user: Annotated[dict, Depends(get_current_user)]
+    run_id: str, user: Annotated[dict, Depends(get_current_user)]
 ) -> JSONResponse:
     """Stop a running strategy runner."""
     await strategy_manager.stop(run_id)
-    return BaseResponseHandler.success_response(data={"message": "Strategy runner stopped successfully"}, status_code=200)
+    return BaseResponseHandler.success_response(
+        data={"message": "Strategy runner stopped successfully"}, status_code=200
+    )
+
 
 @strategy_router.get(
     "/runs/{run_id}/status",
     dependencies=[Depends(security)],
 )
 async def get_run_status(
-    run_id: str,
-    user: Annotated[dict, Depends(get_current_user)]
+    run_id: str, user: Annotated[dict, Depends(get_current_user)]
 ) -> JSONResponse:
     """Get the running status and latest metrics of an active strategy runner."""
     status = strategy_manager.get_status(run_id)
@@ -955,13 +1019,9 @@ async def get_run_status(
 from fastapi import WebSocket, WebSocketDisconnect
 from app.modules.strategy_service.services.websocket_manager import websocket_manager
 
-@strategy_router.websocket(
-    "/runs/{run_id}/ws"
-)
-async def strategy_run_websocket(
-    websocket: WebSocket,
-    run_id: str
-):
+
+@strategy_router.websocket("/runs/{run_id}/ws")
+async def strategy_run_websocket(websocket: WebSocket, run_id: str):
     """Exposes real-time event updates stream for a running strategy session."""
     await websocket_manager.connect(run_id, websocket)
     try:
@@ -973,6 +1033,3 @@ async def strategy_run_websocket(
     except Exception as e:
         logger.error(f"WebSocket session error: {e}")
         websocket_manager.disconnect(run_id, websocket)
-
-
-

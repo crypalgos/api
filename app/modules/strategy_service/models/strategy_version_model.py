@@ -38,17 +38,22 @@ class StrategyVersion(Base):
     source_code: Mapped[str | None] = mapped_column(Text, nullable=True)
     compiled_code: Mapped[str] = mapped_column(Text, nullable=False)
     compiled_hash: Mapped[str] = mapped_column(String(64), nullable=False)
-    is_code_modified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    is_code_modified: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False
+    )
     label: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    approval_status: Mapped[str] = mapped_column(String(32), default="DRAFT", nullable=False)
+    approval_status: Mapped[str] = mapped_column(
+        String(32), default="DRAFT", nullable=False
+    )
     is_golden: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
 
-
     # Relationships
-    strategy: Mapped["Strategy"] = relationship("Strategy", back_populates="versions", foreign_keys=[strategy_id])
+    strategy: Mapped["Strategy"] = relationship(
+        "Strategy", back_populates="versions", foreign_keys=[strategy_id]
+    )
     research_runs: Mapped[list["ResearchRun"]] = relationship(
         "ResearchRun", back_populates="strategy_version", cascade="all, delete-orphan"
     )

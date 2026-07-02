@@ -59,16 +59,18 @@ class StrategyService:
             compile_error = str(e)
             compile_diagnostics = getattr(e, "diagnostics", None)
             if not compile_diagnostics:
-                compile_diagnostics = [{
-                    "node_id": None,
-                    "node_label": "Compiler",
-                    "severity": "ERROR",
-                    "error_code": "COMPILATION_ERROR",
-                    "message": compile_error,
-                    "suggestions": []
-                }]
+                compile_diagnostics = [
+                    {
+                        "node_id": None,
+                        "node_label": "Compiler",
+                        "severity": "ERROR",
+                        "error_code": "COMPILATION_ERROR",
+                        "message": compile_error,
+                        "suggestions": [],
+                    }
+                ]
             compiled_script = f"# Compilation failed during strategy creation.\n# Error: {compile_error}\n"
-        
+
         strategy = Strategy(
             user_id=user_id,
             name=name,
@@ -80,7 +82,11 @@ class StrategyService:
             is_archived=False,
             strategy_type="VISUAL",
             source_code=None,
-            compiled_hash=hashlib.sha256(compiled_script.encode("utf-8")).hexdigest() if isinstance(compiled_script, str) else "mock_hash",
+            compiled_hash=(
+                hashlib.sha256(compiled_script.encode("utf-8")).hexdigest()
+                if isinstance(compiled_script, str)
+                else "mock_hash"
+            ),
             current_version=0,
             has_unpublished_changes=True,
         )
@@ -94,50 +100,72 @@ class StrategyService:
         self, user_id: str, strategy_id: str, code: str
     ) -> tuple[int, StrategyResponseSchema]:
         """Directly overwrite strategy python script inside Monaco editor."""
-        strategy = await self.strategy_repository.get_by_user_and_id(user_id, strategy_id)
+        strategy = await self.strategy_repository.get_by_user_and_id(
+            user_id, strategy_id
+        )
         if not strategy:
             raise ResourceNotFoundException("Strategy not found")
-            
+
         strategy.compiled_code = code
         strategy.source_code = code
         strategy.is_code_modified = True
         strategy.strategy_type = "CODE"
         strategy.has_unpublished_changes = True
-        strategy.compiled_hash = hashlib.sha256(code.encode("utf-8")).hexdigest() if isinstance(code, str) else "mock_hash"
+        strategy.compiled_hash = (
+            hashlib.sha256(code.encode("utf-8")).hexdigest()
+            if isinstance(code, str)
+            else "mock_hash"
+        )
         strategy.updated_at = datetime.utcnow()  # type: ignore[assignment]
-        
+
         updated_strategy = await self.strategy_repository.update(strategy.id)
         return 200, StrategyResponseSchema.model_validate(updated_strategy)
 
     save_strategy_code = save_custom_code
-        
-    async def get_strategy(self, user_id: str, strategy_id: str) -> tuple[int, StrategyResponseSchema]:
+
+    async def get_strategy(
+        self, user_id: str, strategy_id: str
+    ) -> tuple[int, StrategyResponseSchema]:
         """Retrieve a specific visual strategy layout."""
         from sqlalchemy import select
         from sqlalchemy.orm import selectinload
-        from app.modules.strategy_service.models.research_run_model import StrategyLatestResults
+        from app.modules.strategy_service.models.research_run_model import (
+            StrategyLatestResults,
+        )
 
-        stmt = select(Strategy).where(
-            Strategy.id == strategy_id, Strategy.user_id == user_id
-        ).options(
-            selectinload(Strategy.latest_results).selectinload(StrategyLatestResults.latest_backtest)
+        stmt = (
+            select(Strategy)
+            .where(Strategy.id == strategy_id, Strategy.user_id == user_id)
+            .options(
+                selectinload(Strategy.latest_results).selectinload(
+                    StrategyLatestResults.latest_backtest
+                )
+            )
         )
         res = await self.strategy_repository.session.execute(stmt)
         strategy = res.scalar_one_or_none()
 
         if not strategy or strategy.is_archived:
             raise ResourceNotFoundException("Strategy not found")
-            
+
         resp = StrategyResponseSchema.model_validate(strategy)
 
         # Populate counts for single strategy
         from sqlalchemy import func
-        count_stmt = select(ResearchRun.run_type, func.count(ResearchRun.id)).where(
-            ResearchRun.strategy_id == strategy_id
-        ).group_by(ResearchRun.run_type)
+
+        count_stmt = (
+            select(ResearchRun.run_type, func.count(ResearchRun.id))
+            .where(ResearchRun.strategy_id == strategy_id)
+            .group_by(ResearchRun.run_type)
+        )
         count_res = await self.strategy_repository.session.execute(count_stmt)
-        
-        counts = {"backtests": 0, "montecarlos": 0, "walkforwards": 0, "optimizations": 0}
+
+        counts = {
+            "backtests": 0,
+            "montecarlos": 0,
+            "walkforwards": 0,
+            "optimizations": 0,
+        }
         for r_type, cnt in count_res:
             type_key = f"{r_type.lower()}s"
             # Map optimization -> optimizations
@@ -155,16 +183,21 @@ class StrategyService:
         resp.research_counts = counts
 
         # Populate is_golden
-        from app.modules.strategy_service.models.strategy_version_model import StrategyVersion
+        from app.modules.strategy_service.models.strategy_version_model import (
+            StrategyVersion,
+        )
+
         golden_stmt = select(StrategyVersion.id).where(
             StrategyVersion.strategy_id == strategy_id,
-            StrategyVersion.is_golden == True
+            StrategyVersion.is_golden == True,
         )
         golden_res = await self.strategy_repository.session.execute(golden_stmt)
         resp.is_golden = golden_res.scalar() is not None
 
         # Populate latest_metrics and equity_preview
-        latest_backtest = strategy.latest_results.latest_backtest if strategy.latest_results else None
+        latest_backtest = (
+            strategy.latest_results.latest_backtest if strategy.latest_results else None
+        )
         if latest_backtest and latest_backtest.summary_json:
             sum_json = latest_backtest.summary_json
             resp.latest_metrics = {
@@ -180,11 +213,19 @@ class StrategyService:
         return 200, resp
 
     async def list_strategies(
-        self, user_id: str, page: int = 1, limit: int = 8, search: str = "", is_template: Optional[bool] = None, archived: bool = False
+        self,
+        user_id: str,
+        page: int = 1,
+        limit: int = 8,
+        search: str = "",
+        is_template: Optional[bool] = None,
+        archived: bool = False,
     ) -> tuple[int, PaginatedStrategiesResponseSchema]:
         """Retrieve paginated summary list of user strategies."""
-        paginated_data = await self.strategy_repository.get_strategies_paginated(user_id, page, limit, search, archived=archived)
-        
+        paginated_data = await self.strategy_repository.get_strategies_paginated(
+            user_id, page, limit, search, archived=archived
+        )
+
         # Filter templates if requested
         items = paginated_data["strategies"]
         if is_template is not None:
@@ -196,15 +237,16 @@ class StrategyService:
 
         if strategy_ids:
             from sqlalchemy import select, func
+
             # Query counts
-            count_stmt = select(
-                ResearchRun.strategy_id,
-                ResearchRun.run_type,
-                func.count(ResearchRun.id)
-            ).where(
-                ResearchRun.strategy_id.in_(strategy_ids)
-            ).group_by(
-                ResearchRun.strategy_id, ResearchRun.run_type
+            count_stmt = (
+                select(
+                    ResearchRun.strategy_id,
+                    ResearchRun.run_type,
+                    func.count(ResearchRun.id),
+                )
+                .where(ResearchRun.strategy_id.in_(strategy_ids))
+                .group_by(ResearchRun.strategy_id, ResearchRun.run_type)
             )
             count_res = await self.strategy_repository.session.execute(count_stmt)
             for strat_id, r_type, cnt in count_res:
@@ -213,10 +255,10 @@ class StrategyService:
                         "backtests": 0,
                         "montecarlos": 0,
                         "walkforwards": 0,
-                        "optimizations": 0
+                        "optimizations": 0,
                     }
-                
-                type_key = f"{r_type.lower()}s" # BACKTEST -> backtests
+
+                type_key = f"{r_type.lower()}s"  # BACKTEST -> backtests
                 if type_key == "optimizations":
                     type_key = "optimizations"
                 elif type_key == "montecarlos":
@@ -230,10 +272,13 @@ class StrategyService:
                     research_counts_map[strat_id][type_key] = cnt
 
             # Check golden versions
-            from app.modules.strategy_service.models.strategy_version_model import StrategyVersion
+            from app.modules.strategy_service.models.strategy_version_model import (
+                StrategyVersion,
+            )
+
             golden_stmt = select(StrategyVersion.strategy_id).where(
                 StrategyVersion.strategy_id.in_(strategy_ids),
-                StrategyVersion.is_golden == True
+                StrategyVersion.is_golden == True,
             )
             golden_res = await self.strategy_repository.session.execute(golden_stmt)
             for row in golden_res:
@@ -242,20 +287,25 @@ class StrategyService:
         response_strategies = []
         for s in items:
             resp = StrategyResponseSchema.model_validate(s)
-            
+
             # Set is_golden
             resp.is_golden = golden_versions_map.get(s.id, False)
-            
+
             # Set research_counts
-            resp.research_counts = research_counts_map.get(s.id, {
-                "backtests": 0,
-                "montecarlos": 0,
-                "walkforwards": 0,
-                "optimizations": 0
-            })
-            
+            resp.research_counts = research_counts_map.get(
+                s.id,
+                {
+                    "backtests": 0,
+                    "montecarlos": 0,
+                    "walkforwards": 0,
+                    "optimizations": 0,
+                },
+            )
+
             # Set latest_metrics & equity_preview
-            latest_backtest = s.latest_results.latest_backtest if s.latest_results else None
+            latest_backtest = (
+                s.latest_results.latest_backtest if s.latest_results else None
+            )
             if latest_backtest and latest_backtest.summary_json:
                 sum_json = latest_backtest.summary_json
                 resp.latest_metrics = {
@@ -267,7 +317,7 @@ class StrategyService:
             else:
                 resp.latest_metrics = None
                 resp.equity_preview = None
-                
+
             response_strategies.append(resp)
 
         paginated_data["strategies"] = response_strategies
@@ -275,13 +325,20 @@ class StrategyService:
         return 200, PaginatedStrategiesResponseSchema.model_validate(paginated_data)
 
     async def update_canvas(
-        self, user_id: str, strategy_id: str, canvas_json: dict, name: str | None = None, description: str | None = None
+        self,
+        user_id: str,
+        strategy_id: str,
+        canvas_json: dict,
+        name: str | None = None,
+        description: str | None = None,
     ) -> tuple[int, StrategyResponseSchema]:
         """Save visual canvas node/edge graph and recompile to Python strategy code."""
-        strategy = await self.strategy_repository.get_by_user_and_id(user_id, strategy_id)
+        strategy = await self.strategy_repository.get_by_user_and_id(
+            user_id, strategy_id
+        )
         if not strategy or strategy.is_archived:
             raise ResourceNotFoundException("Strategy not found")
-        
+
         compiler = DAGCompiler()
         compile_error = None
         compile_diagnostics = None
@@ -292,14 +349,16 @@ class StrategyService:
             compile_error = str(e)
             compile_diagnostics = getattr(e, "diagnostics", None)
             if not compile_diagnostics:
-                compile_diagnostics = [{
-                    "node_id": None,
-                    "node_label": "Compiler",
-                    "severity": "ERROR",
-                    "error_code": "COMPILATION_ERROR",
-                    "message": compile_error,
-                    "suggestions": []
-                }]
+                compile_diagnostics = [
+                    {
+                        "node_id": None,
+                        "node_label": "Compiler",
+                        "severity": "ERROR",
+                        "error_code": "COMPILATION_ERROR",
+                        "message": compile_error,
+                        "suggestions": [],
+                    }
+                ]
             compiled_script = strategy.compiled_code
 
         strategy.canvas_json = canvas_json
@@ -307,13 +366,17 @@ class StrategyService:
         strategy.is_code_modified = False
         strategy.strategy_type = "VISUAL"
         strategy.has_unpublished_changes = True
-        strategy.compiled_hash = hashlib.sha256(compiled_script.encode("utf-8")).hexdigest() if isinstance(compiled_script, str) else "mock_hash"
+        strategy.compiled_hash = (
+            hashlib.sha256(compiled_script.encode("utf-8")).hexdigest()
+            if isinstance(compiled_script, str)
+            else "mock_hash"
+        )
         strategy.updated_at = datetime.utcnow()  # type: ignore[assignment]
         if name is not None:
             strategy.name = name
         if description is not None:
             strategy.description = description
-            
+
         updated_strategy = await self.strategy_repository.update(strategy.id)
         response = StrategyResponseSchema.model_validate(updated_strategy)
         response.compile_error = compile_error
@@ -324,67 +387,84 @@ class StrategyService:
         self, user_id: str, strategy_id: str
     ) -> tuple[int, StrategyResponseSchema]:
         """Reset custom code edits by recompiling from the saved Visual Canvas graph."""
-        strategy = await self.strategy_repository.get_by_user_and_id(user_id, strategy_id)
+        strategy = await self.strategy_repository.get_by_user_and_id(
+            user_id, strategy_id
+        )
         if not strategy or strategy.is_archived:
             raise ResourceNotFoundException("Strategy not found")
-            
+
         compiler = DAGCompiler()
         compiled_script = compiler.compile_dag(strategy.canvas_json)
-        
+
         strategy.compiled_code = compiled_script
         strategy.is_code_modified = False
         strategy.strategy_type = "VISUAL"
         strategy.has_unpublished_changes = True
-        strategy.compiled_hash = hashlib.sha256(compiled_script.encode("utf-8")).hexdigest() if isinstance(compiled_script, str) else "mock_hash"
+        strategy.compiled_hash = (
+            hashlib.sha256(compiled_script.encode("utf-8")).hexdigest()
+            if isinstance(compiled_script, str)
+            else "mock_hash"
+        )
         strategy.updated_at = datetime.utcnow()  # type: ignore[assignment]
-        
+
         updated_strategy = await self.strategy_repository.update(strategy.id)
         return 200, StrategyResponseSchema.model_validate(updated_strategy)
 
-
     async def delete_strategy(self, user_id: str, strategy_id: str) -> tuple[int, dict]:
         """Soft delete if active, or permanently hard delete (cleaning S3/DB) if already archived."""
-        strategy = await self.strategy_repository.get_by_user_and_id(user_id, strategy_id)
+        strategy = await self.strategy_repository.get_by_user_and_id(
+            user_id, strategy_id
+        )
         if not strategy:
             raise ResourceNotFoundException("Strategy not found")
-            
+
         if strategy.is_archived:
             from sqlalchemy import delete
+
             # 1. Clean up S3 prefix / files
             await storage_service.delete_directory(f"reports/{strategy_id}")
-            
+
             # 2. Delete associated research runs from database
             await self.strategy_repository.session.execute(
                 delete(ResearchRun).where(ResearchRun.strategy_id == strategy_id)
             )
-            
+
             # 3. Delete latest results mapping
             await self.strategy_repository.session.execute(
-                delete(StrategyLatestResults).where(StrategyLatestResults.strategy_id == strategy_id)
+                delete(StrategyLatestResults).where(
+                    StrategyLatestResults.strategy_id == strategy_id
+                )
             )
-            
+
             # 4. Hard delete the strategy row
             await self.strategy_repository.session.execute(
                 delete(Strategy).where(Strategy.id == strategy_id)
             )
             await self.strategy_repository.session.commit()
-            
-            return 200, {"success": True, "message": "Strategy and all associated history permanently deleted."}
-            
+
+            return 200, {
+                "success": True,
+                "message": "Strategy and all associated history permanently deleted.",
+            }
+
         strategy.is_archived = True
         strategy.updated_at = datetime.utcnow()  # type: ignore[assignment]
         await self.strategy_repository.update(strategy.id)
         return 200, {"success": True, "message": "Strategy archived successfully."}
 
-    async def restore_strategy(self, user_id: str, strategy_id: str) -> tuple[int, dict]:
+    async def restore_strategy(
+        self, user_id: str, strategy_id: str
+    ) -> tuple[int, dict]:
         """Restore/unarchive a strategy from soft delete."""
-        strategy = await self.strategy_repository.get_by_user_and_id(user_id, strategy_id)
+        strategy = await self.strategy_repository.get_by_user_and_id(
+            user_id, strategy_id
+        )
         if not strategy:
             raise ResourceNotFoundException("Strategy not found")
-            
+
         if not strategy.is_archived:
             return 200, StrategyResponseSchema.model_validate(strategy).model_dump()
-            
+
         strategy.is_archived = False
         strategy.updated_at = datetime.utcnow()  # type: ignore[assignment]
         updated_strategy = await self.strategy_repository.update(strategy.id)
@@ -393,13 +473,20 @@ class StrategyService:
     # ─── Research Runs Methods ──────────────────────────────────────────────────
 
     async def trigger_backtest(
-        self, user_id: str, strategy_id: str, start_date: datetime, end_date: datetime, initial_capital: float,
-        parent_run_id: Optional[str] = None
+        self,
+        user_id: str,
+        strategy_id: str,
+        start_date: datetime,
+        end_date: datetime,
+        initial_capital: float,
+        parent_run_id: Optional[str] = None,
     ) -> tuple[int, dict]:
         """Submit a single backtest job to the Celery worker."""
         from app.modules.strategy_service.tasks import run_asynchronous_backtest_task
 
-        strategy = await self.strategy_repository.get_by_user_and_id(user_id, strategy_id)
+        strategy = await self.strategy_repository.get_by_user_and_id(
+            user_id, strategy_id
+        )
         if not strategy or strategy.is_archived:
             raise ResourceNotFoundException("Strategy not found")
 
@@ -424,25 +511,36 @@ class StrategyService:
             start_date_iso=start_date.isoformat(),
             end_date_iso=end_date.isoformat(),
             initial_capital=initial_capital,
-            strategy_version_id=active_version.id
+            strategy_version_id=active_version.id,
         )
 
         return 202, {
             "run_id": created_run.id,
             "task_id": task.id,
             "status": "PENDING",
-            "message": "Backtest enqueued successfully."
+            "message": "Backtest enqueued successfully.",
         }
 
     async def trigger_optimization(
-        self, user_id: str, strategy_id: str, start_date: datetime, end_date: datetime, initial_capital: float,
-        parameter_space: list, constraints: list, objective: str, search_type: str, max_runs: int,
-        parent_run_id: Optional[str] = None
+        self,
+        user_id: str,
+        strategy_id: str,
+        start_date: datetime,
+        end_date: datetime,
+        initial_capital: float,
+        parameter_space: list,
+        constraints: list,
+        objective: str,
+        search_type: str,
+        max_runs: int,
+        parent_run_id: Optional[str] = None,
     ) -> tuple[int, dict]:
         """Submit an optimization job to the Celery worker."""
         from app.modules.strategy_service.tasks import run_optimization_task
 
-        strategy = await self.strategy_repository.get_by_user_and_id(user_id, strategy_id)
+        strategy = await self.strategy_repository.get_by_user_and_id(
+            user_id, strategy_id
+        )
         if not strategy or strategy.is_archived:
             raise ResourceNotFoundException("Strategy not found")
 
@@ -472,25 +570,38 @@ class StrategyService:
             objective=objective,
             search_type=search_type,
             max_runs=max_runs,
-            strategy_version_id=active_version.id
+            strategy_version_id=active_version.id,
         )
 
         return 202, {
             "run_id": created_run.id,
             "task_id": task.id,
             "status": "PENDING",
-            "message": "Optimization enqueued successfully."
+            "message": "Optimization enqueued successfully.",
         }
 
     async def trigger_walkforward(
-        self, user_id: str, strategy_id: str, start_date: datetime, end_date: datetime, initial_capital: float,
-        train_period_months: int, test_period_months: int, step_months: int, objective: str,
-        parameter_space: list, constraints: list, window_type: str, parent_run_id: Optional[str] = None
+        self,
+        user_id: str,
+        strategy_id: str,
+        start_date: datetime,
+        end_date: datetime,
+        initial_capital: float,
+        train_period_months: int,
+        test_period_months: int,
+        step_months: int,
+        objective: str,
+        parameter_space: list,
+        constraints: list,
+        window_type: str,
+        parent_run_id: Optional[str] = None,
     ) -> tuple[int, dict]:
         """Submit a walkforward validation job to the Celery worker."""
         from app.modules.strategy_service.tasks import run_walkforward_task
 
-        strategy = await self.strategy_repository.get_by_user_and_id(user_id, strategy_id)
+        strategy = await self.strategy_repository.get_by_user_and_id(
+            user_id, strategy_id
+        )
         if not strategy or strategy.is_archived:
             raise ResourceNotFoundException("Strategy not found")
 
@@ -526,24 +637,31 @@ class StrategyService:
             initial_capital=initial_capital,
             window_config_json=window_config,
             objective=objective,
-            strategy_version_id=active_version.id
+            strategy_version_id=active_version.id,
         )
 
         return 202, {
             "run_id": created_run.id,
             "task_id": task.id,
             "status": "PENDING",
-            "message": "WalkForward enqueued successfully."
+            "message": "WalkForward enqueued successfully.",
         }
 
     async def trigger_montecarlo(
-        self, user_id: str, strategy_id: str, source_backtest_id: str, simulation_count: int,
-        method: str, random_seed: Optional[int]
+        self,
+        user_id: str,
+        strategy_id: str,
+        source_backtest_id: str,
+        simulation_count: int,
+        method: str,
+        random_seed: Optional[int],
     ) -> tuple[int, dict]:
         """Submit a Monte Carlo simulation job to the Celery worker."""
         from app.modules.strategy_service.tasks import run_montecarlo_task
 
-        strategy = await self.strategy_repository.get_by_user_and_id(user_id, strategy_id)
+        strategy = await self.strategy_repository.get_by_user_and_id(
+            user_id, strategy_id
+        )
         if not strategy or strategy.is_archived:
             raise ResourceNotFoundException("Strategy not found")
 
@@ -569,30 +687,42 @@ class StrategyService:
             simulation_count=simulation_count,
             method=method,
             random_seed=random_seed,
-            strategy_version_id=active_version.id
+            strategy_version_id=active_version.id,
         )
 
         return 202, {
             "run_id": created_run.id,
             "task_id": task.id,
             "status": "PENDING",
-            "message": "Monte Carlo enqueued successfully."
+            "message": "Monte Carlo enqueued successfully.",
         }
 
-
-
     async def list_runs(
-        self, user_id: str, strategy_id: str, run_type: Optional[str] = None, status: Optional[str] = None,
-        is_favorite: Optional[bool] = None, sort_by: str = "updated_at", page: int = 1, limit: int = 8
+        self,
+        user_id: str,
+        strategy_id: str,
+        run_type: Optional[str] = None,
+        status: Optional[str] = None,
+        is_favorite: Optional[bool] = None,
+        sort_by: str = "updated_at",
+        page: int = 1,
+        limit: int = 8,
     ) -> tuple[int, PaginatedResearchRunsResponseSchema]:
         """Get paginated history of research runs, sorted and filtered."""
-        strategy = await self.strategy_repository.get_by_user_and_id(user_id, strategy_id)
+        strategy = await self.strategy_repository.get_by_user_and_id(
+            user_id, strategy_id
+        )
         if not strategy:
             raise ResourceNotFoundException("Strategy not found")
 
         paginated = await self.run_repository.get_runs_paginated(
-            strategy_id=strategy_id, run_type=run_type, status=status,
-            is_favorite=is_favorite, sort_by=sort_by, page=page, limit=limit
+            strategy_id=strategy_id,
+            run_type=run_type,
+            status=status,
+            is_favorite=is_favorite,
+            sort_by=sort_by,
+            page=page,
+            limit=limit,
         )
 
         return 200, PaginatedResearchRunsResponseSchema.model_validate(paginated)
@@ -601,7 +731,9 @@ class StrategyService:
         self, user_id: str, strategy_id: str, run_id: str
     ) -> tuple[int, Dict[str, Any]]:
         """Fetch details of a single run, returning the artifact manifest for lazy loading."""
-        strategy = await self.strategy_repository.get_by_user_and_id(user_id, strategy_id)
+        strategy = await self.strategy_repository.get_by_user_and_id(
+            user_id, strategy_id
+        )
         if not strategy:
             raise ResourceNotFoundException("Strategy not found")
 
@@ -629,7 +761,11 @@ class StrategyService:
         }
 
     async def edit_run(
-        self, user_id: str, run_id: str, name: Optional[str] = None, description: Optional[str] = None
+        self,
+        user_id: str,
+        run_id: str,
+        name: Optional[str] = None,
+        description: Optional[str] = None,
     ) -> tuple[int, ResearchRunResponseSchema]:
         """Update a run's name and/or description."""
         run = await self.run_repository.get_by_id(run_id)
@@ -637,7 +773,9 @@ class StrategyService:
             raise ResourceNotFoundException("Research run not found")
 
         # Verify strategy owner
-        strategy = await self.strategy_repository.get_by_user_and_id(user_id, run.strategy_id)
+        strategy = await self.strategy_repository.get_by_user_and_id(
+            user_id, run.strategy_id
+        )
         if not strategy:
             raise ResourceNotFoundException("Strategy not found")
 
@@ -658,7 +796,9 @@ class StrategyService:
         if not run:
             raise ResourceNotFoundException("Research run not found")
 
-        strategy = await self.strategy_repository.get_by_user_and_id(user_id, run.strategy_id)
+        strategy = await self.strategy_repository.get_by_user_and_id(
+            user_id, run.strategy_id
+        )
         if not strategy:
             raise ResourceNotFoundException("Strategy not found")
 
@@ -674,7 +814,9 @@ class StrategyService:
         if not run:
             raise ResourceNotFoundException("Research run not found")
 
-        strategy = await self.strategy_repository.get_by_user_and_id(user_id, run.strategy_id)
+        strategy = await self.strategy_repository.get_by_user_and_id(
+            user_id, run.strategy_id
+        )
         if not strategy:
             raise ResourceNotFoundException("Strategy not found")
 
@@ -695,7 +837,9 @@ class StrategyService:
         if not run:
             raise ResourceNotFoundException("Research run not found")
 
-        strategy = await self.strategy_repository.get_by_user_and_id(user_id, run.strategy_id)
+        strategy = await self.strategy_repository.get_by_user_and_id(
+            user_id, run.strategy_id
+        )
         if not strategy:
             raise ResourceNotFoundException("Strategy not found")
 
@@ -717,7 +861,9 @@ class StrategyService:
         self, user_id: str, strategy_id: str, run_type: str
     ) -> tuple[int, Dict[str, Any]]:
         """Retrieve latest run report by looking up latest run ID from database and downloading its S3 artifact."""
-        strategy = await self.strategy_repository.get_by_user_and_id(user_id, strategy_id)
+        strategy = await self.strategy_repository.get_by_user_and_id(
+            user_id, strategy_id
+        )
         if not strategy:
             raise ResourceNotFoundException("Strategy not found")
 
@@ -749,7 +895,9 @@ class StrategyService:
         except Exception:
             raise ResourceNotFoundException("Latest run report not found in storage.")
 
-    async def get_template_library(self, user_id: str) -> tuple[int, List[TemplateLibraryItemSchema]]:
+    async def get_template_library(
+        self, user_id: str
+    ) -> tuple[int, List[TemplateLibraryItemSchema]]:
         """List strategies that are marked as templates, returning their latest runs summaries."""
         strategies = await self.strategy_repository.get_by_user_id(user_id)
         templates = [s for s in strategies if s.is_template and not s.is_archived]
@@ -767,24 +915,32 @@ class StrategyService:
                     bt = await self.run_repository.get_by_id(latest.latest_backtest_id)
                     latest_backtest = bt.summary_json if bt else None
                 if latest.latest_optimization_id:
-                    opt = await self.run_repository.get_by_id(latest.latest_optimization_id)
+                    opt = await self.run_repository.get_by_id(
+                        latest.latest_optimization_id
+                    )
                     latest_optimization = opt.summary_json if opt else None
                 if latest.latest_walkforward_id:
-                    wf = await self.run_repository.get_by_id(latest.latest_walkforward_id)
+                    wf = await self.run_repository.get_by_id(
+                        latest.latest_walkforward_id
+                    )
                     latest_walkforward = wf.summary_json if wf else None
                 if latest.latest_montecarlo_id:
-                    mc = await self.run_repository.get_by_id(latest.latest_montecarlo_id)
+                    mc = await self.run_repository.get_by_id(
+                        latest.latest_montecarlo_id
+                    )
                     latest_montecarlo = mc.summary_json if mc else None
 
-            items.append(TemplateLibraryItemSchema(
-                strategy_id=temp.id,
-                strategy_name=temp.name,
-                description=temp.description,
-                latest_backtest=latest_backtest,
-                latest_optimization=latest_optimization,
-                latest_walkforward=latest_walkforward,
-                latest_montecarlo=latest_montecarlo,
-            ))
+            items.append(
+                TemplateLibraryItemSchema(
+                    strategy_id=temp.id,
+                    strategy_name=temp.name,
+                    description=temp.description,
+                    latest_backtest=latest_backtest,
+                    latest_optimization=latest_optimization,
+                    latest_walkforward=latest_walkforward,
+                    latest_montecarlo=latest_montecarlo,
+                )
+            )
 
         return 200, items
 
@@ -796,35 +952,43 @@ class StrategyService:
         if not run:
             raise ResourceNotFoundException("Research run not found")
 
-        strategy = await self.strategy_repository.get_by_user_and_id(user_id, run.strategy_id)
+        strategy = await self.strategy_repository.get_by_user_and_id(
+            user_id, run.strategy_id
+        )
         if not strategy:
             raise ResourceNotFoundException("Strategy not found")
 
-        workspace_key = run.artifact_manifest.get("workspace") if run.artifact_manifest else None
+        workspace_key = (
+            run.artifact_manifest.get("workspace") if run.artifact_manifest else None
+        )
         if not workspace_key:
             raise ResourceNotFoundException("Run dataset has no workspace key.")
 
         try:
-            from app.modules.strategy_service.services.storage_service import storage_service
+            from app.modules.strategy_service.services.storage_service import (
+                storage_service,
+            )
             import pyarrow as pa
             import io, tarfile, json
             import zstandard as zstd
-            
+
             # Download raw zstd tar
             raw_zstd = await storage_service.download_raw_payload(workspace_key)
             dctx = zstd.ZstdDecompressor()
             tar_io = io.BytesIO(dctx.decompress(raw_zstd))
-            
-            with tarfile.open(fileobj=tar_io, mode='r') as tar:
+
+            with tarfile.open(fileobj=tar_io, mode="r") as tar:
                 # 1. Read manifest.json
                 try:
                     manifest_file = tar.extractfile("manifest.json")
                     if not manifest_file:
-                        raise ResourceNotFoundException("Workspace manifest.json not found")
-                    manifest = json.loads(manifest_file.read().decode('utf-8'))
+                        raise ResourceNotFoundException(
+                            "Workspace manifest.json not found"
+                        )
+                    manifest = json.loads(manifest_file.read().decode("utf-8"))
                 except KeyError:
                     raise ResourceNotFoundException("Workspace manifest.json not found")
-                
+
                 # 2. Find dataset in manifest
                 datasets_list = manifest.get("datasets", [])
                 dataset_meta = None
@@ -832,42 +996,54 @@ class StrategyService:
                     if ds.get("dataset_id") == dataset_name:
                         dataset_meta = ds
                         break
-                
+
                 if not dataset_meta:
-                    raise ResourceNotFoundException(f"Dataset {dataset_name} not found in manifest")
-                
+                    raise ResourceNotFoundException(
+                        f"Dataset {dataset_name} not found in manifest"
+                    )
+
                 path = dataset_meta.get("path")
                 if not path:
-                    raise ResourceNotFoundException(f"Path for dataset {dataset_name} not found in manifest")
-                
+                    raise ResourceNotFoundException(
+                        f"Path for dataset {dataset_name} not found in manifest"
+                    )
+
                 # 3. Extract the file at the resolved path
                 try:
                     f = tar.extractfile(path)
                     if not f:
-                        raise ResourceNotFoundException(f"Dataset file at {path} not found in workspace archive")
+                        raise ResourceNotFoundException(
+                            f"Dataset file at {path} not found in workspace archive"
+                        )
                     buf = f.read()
-                    
+
                     with pa.ipc.open_file(io.BytesIO(buf)) as reader:
                         table = reader.read_all()
                         rows = table.to_pylist()
-                        
+
                         for row in rows:
                             for k, v in list(row.items()):
-                                if isinstance(v, str) and (v.startswith("{") or v.startswith("[")):
+                                if isinstance(v, str) and (
+                                    v.startswith("{") or v.startswith("[")
+                                ):
                                     try:
                                         row[k] = json.loads(v)
                                     except Exception:
                                         pass
                         return 200, rows
                 except KeyError:
-                    raise ResourceNotFoundException(f"Dataset file at {path} not found in workspace archive")
-                    
+                    raise ResourceNotFoundException(
+                        f"Dataset file at {path} not found in workspace archive"
+                    )
+
         except ResourceNotFoundException:
             raise
         except Exception as e:
             logger.error(f"Failed to download dataset {dataset_name}: {e}")
-            raise ResourceNotFoundException("Dataset payload not found or failed to parse.")
- 
+            raise ResourceNotFoundException(
+                "Dataset payload not found or failed to parse."
+            )
+
     async def get_run_artifact(
         self, user_id: str, run_id: str, artifact_type: str
     ) -> tuple[int, dict]:
@@ -875,25 +1051,36 @@ class StrategyService:
         run = await self.run_repository.get_by_id(run_id)
         if not run:
             raise ResourceNotFoundException("Research run not found")
- 
-        strategy = await self.strategy_repository.get_by_user_and_id(user_id, run.strategy_id)
+
+        strategy = await self.strategy_repository.get_by_user_and_id(
+            user_id, run.strategy_id
+        )
         if not strategy:
             raise ResourceNotFoundException("Strategy not found")
-             
-        key = run.artifact_manifest.get(artifact_type) if run.artifact_manifest else None
+
+        key = (
+            run.artifact_manifest.get(artifact_type) if run.artifact_manifest else None
+        )
         if not key:
             raise ResourceNotFoundException(f"Run has no {artifact_type} artifact.")
-             
+
         try:
-            from app.modules.strategy_service.services.storage_service import storage_service
+            from app.modules.strategy_service.services.storage_service import (
+                storage_service,
+            )
+
             if key.endswith(".msgpack.zstd"):
                 payload = await storage_service.download_payload(key)
                 return 200, payload
             else:
-                raise ValueError("Only msgpack JSON artifacts are supported via this endpoint")
+                raise ValueError(
+                    "Only msgpack JSON artifacts are supported via this endpoint"
+                )
         except Exception as e:
             logger.error(f"Failed to fetch artifact {artifact_type}: {e}")
-            raise ResourceNotFoundException("Artifact payload not found or failed to parse.")
+            raise ResourceNotFoundException(
+                "Artifact payload not found or failed to parse."
+            )
 
     async def _ensure_active_version(self, strategy: Strategy) -> Any:
         """
@@ -916,12 +1103,11 @@ class StrategyService:
             current_hash = "mock_hash"
         strategy.compiled_hash = current_hash
 
-
         if not strategy.has_unpublished_changes and strategy.current_version > 0:
             # Look up existing version
             stmt = select(StrategyVersion).where(
                 StrategyVersion.strategy_id == strategy.id,
-                StrategyVersion.version == strategy.current_version
+                StrategyVersion.version == strategy.current_version,
             )
             res = await self.strategy_repository.session.execute(stmt)
             existing_version = res.scalar_one_or_none()
@@ -967,7 +1153,9 @@ class StrategyService:
             StrategyVersion,
         )
 
-        strategy = await self.strategy_repository.get_by_user_and_id(user_id, strategy_id)
+        strategy = await self.strategy_repository.get_by_user_and_id(
+            user_id, strategy_id
+        )
         if not strategy or strategy.is_archived:
             raise ResourceNotFoundException("Strategy not found")
 
@@ -978,7 +1166,6 @@ class StrategyService:
         else:
             current_hash = "mock_hash"
         strategy.compiled_hash = current_hash
-
 
         # Get max version
         max_ver_stmt = select(func.max(StrategyVersion.version)).where(
@@ -1018,13 +1205,17 @@ class StrategyService:
             StrategyVersion,
         )
 
-        strategy = await self.strategy_repository.get_by_user_and_id(user_id, strategy_id)
+        strategy = await self.strategy_repository.get_by_user_and_id(
+            user_id, strategy_id
+        )
         if not strategy or strategy.is_archived:
             raise ResourceNotFoundException("Strategy not found")
 
-        stmt = select(StrategyVersion).where(
-            StrategyVersion.strategy_id == strategy_id
-        ).order_by(StrategyVersion.version.desc())
+        stmt = (
+            select(StrategyVersion)
+            .where(StrategyVersion.strategy_id == strategy_id)
+            .order_by(StrategyVersion.version.desc())
+        )
         res = await self.strategy_repository.session.execute(stmt)
         versions = res.scalars().all()
         return 200, [StrategyVersionResponseSchema.model_validate(v) for v in versions]
@@ -1039,13 +1230,15 @@ class StrategyService:
             StrategyVersion,
         )
 
-        strategy = await self.strategy_repository.get_by_user_and_id(user_id, strategy_id)
+        strategy = await self.strategy_repository.get_by_user_and_id(
+            user_id, strategy_id
+        )
         if not strategy or strategy.is_archived:
             raise ResourceNotFoundException("Strategy not found")
 
         stmt = select(StrategyVersion).where(
             StrategyVersion.strategy_id == strategy_id,
-            StrategyVersion.version == version
+            StrategyVersion.version == version,
         )
         res = await self.strategy_repository.session.execute(stmt)
         snapshot = res.scalar_one_or_none()
@@ -1063,13 +1256,15 @@ class StrategyService:
             StrategyVersion,
         )
 
-        strategy = await self.strategy_repository.get_by_user_and_id(user_id, strategy_id)
+        strategy = await self.strategy_repository.get_by_user_and_id(
+            user_id, strategy_id
+        )
         if not strategy or strategy.is_archived:
             raise ResourceNotFoundException("Strategy not found")
 
         stmt = select(StrategyVersion).where(
             StrategyVersion.strategy_id == strategy_id,
-            StrategyVersion.version == version
+            StrategyVersion.version == version,
         )
         res = await self.strategy_repository.session.execute(stmt)
         snapshot = res.scalar_one_or_none()
@@ -1083,12 +1278,12 @@ class StrategyService:
         strategy.compiled_hash = snapshot.compiled_hash
         strategy.is_code_modified = snapshot.is_code_modified
         strategy.strategy_type = "CODE" if snapshot.is_code_modified else "VISUAL"
-        
+
         # In restore workflow: retaining the active version index but setting has_unpublished_changes = True
         strategy.current_version = snapshot.version
         strategy.has_unpublished_changes = True
         strategy.updated_at = datetime.utcnow()  # type: ignore[assignment]
-        
+
         updated_strategy = await self.strategy_repository.update(strategy.id)
         return 200, StrategyResponseSchema.model_validate(updated_strategy)
 
@@ -1104,13 +1299,15 @@ class StrategyService:
             StrategyVersion,
         )
 
-        strategy = await self.strategy_repository.get_by_user_and_id(user_id, strategy_id)
+        strategy = await self.strategy_repository.get_by_user_and_id(
+            user_id, strategy_id
+        )
         if not strategy or strategy.is_archived:
             raise ResourceNotFoundException("Strategy not found")
 
         stmt = select(StrategyVersion).where(
             StrategyVersion.strategy_id == strategy_id,
-            StrategyVersion.version == version
+            StrategyVersion.version == version,
         )
         res = await self.strategy_repository.session.execute(stmt)
         snapshot = res.scalar_one_or_none()
@@ -1120,7 +1317,7 @@ class StrategyService:
         # Compute unified diff of compiled_code
         version_code_lines = snapshot.compiled_code.splitlines(keepends=True)
         draft_code_lines = strategy.compiled_code.splitlines(keepends=True)
-        
+
         diff = difflib.unified_diff(
             version_code_lines,
             draft_code_lines,
@@ -1133,8 +1330,7 @@ class StrategyService:
         canvas_changed = snapshot.canvas_json != strategy.canvas_json
 
         return 200, VersionDiffResponseSchema(
-            diff_code=diff_str,
-            canvas_changed=canvas_changed
+            diff_code=diff_str, canvas_changed=canvas_changed
         )
 
     async def update_version_label(
@@ -1147,13 +1343,15 @@ class StrategyService:
             StrategyVersion,
         )
 
-        strategy = await self.strategy_repository.get_by_user_and_id(user_id, strategy_id)
+        strategy = await self.strategy_repository.get_by_user_and_id(
+            user_id, strategy_id
+        )
         if not strategy or strategy.is_archived:
             raise ResourceNotFoundException("Strategy not found")
 
         stmt = select(StrategyVersion).where(
             StrategyVersion.strategy_id == strategy_id,
-            StrategyVersion.version == version
+            StrategyVersion.version == version,
         )
         res = await self.strategy_repository.session.execute(stmt)
         snapshot = res.scalar_one_or_none()
@@ -1174,18 +1372,29 @@ class StrategyService:
             StrategyVersion,
         )
 
-        ALLOWED_STATUSES = {"DRAFT", "REVIEWING", "APPROVED", "REJECTED", "PAPER_TRADING", "LIVE"}
+        ALLOWED_STATUSES = {
+            "DRAFT",
+            "REVIEWING",
+            "APPROVED",
+            "REJECTED",
+            "PAPER_TRADING",
+            "LIVE",
+        }
         status_upper = status.upper()
         if status_upper not in ALLOWED_STATUSES:
-            raise ValueError(f"Invalid approval status. Must be one of: {ALLOWED_STATUSES}")
+            raise ValueError(
+                f"Invalid approval status. Must be one of: {ALLOWED_STATUSES}"
+            )
 
-        strategy = await self.strategy_repository.get_by_user_and_id(user_id, strategy_id)
+        strategy = await self.strategy_repository.get_by_user_and_id(
+            user_id, strategy_id
+        )
         if not strategy or strategy.is_archived:
             raise ResourceNotFoundException("Strategy not found")
 
         stmt = select(StrategyVersion).where(
             StrategyVersion.strategy_id == strategy_id,
-            StrategyVersion.version == version
+            StrategyVersion.version == version,
         )
         res = await self.strategy_repository.session.execute(stmt)
         snapshot = res.scalar_one_or_none()
@@ -1206,7 +1415,9 @@ class StrategyService:
             StrategyVersion,
         )
 
-        strategy = await self.strategy_repository.get_by_user_and_id(user_id, strategy_id)
+        strategy = await self.strategy_repository.get_by_user_and_id(
+            user_id, strategy_id
+        )
         if not strategy or strategy.is_archived:
             raise ResourceNotFoundException("Strategy not found")
 
@@ -1216,7 +1427,7 @@ class StrategyService:
         else:
             stmt = select(StrategyVersion).where(
                 StrategyVersion.strategy_id == strategy_id,
-                StrategyVersion.version == version
+                StrategyVersion.version == version,
             )
             res = await self.strategy_repository.session.execute(stmt)
             snapshot = res.scalar_one_or_none()
@@ -1245,20 +1456,20 @@ class StrategyService:
         """Create a new research note for a strategy (optionally linked to a run)."""
         from app.modules.strategy_service.models.research_note_model import ResearchNote
 
-        strategy = await self.strategy_repository.get_by_user_and_id(user_id, strategy_id)
+        strategy = await self.strategy_repository.get_by_user_and_id(
+            user_id, strategy_id
+        )
         if not strategy or strategy.is_archived:
             raise ResourceNotFoundException("Strategy not found")
 
         if run_id:
             run = await self.run_repository.get_by_id(run_id)
             if not run or run.strategy_id != strategy_id:
-                raise ResourceNotFoundException("Research run not found or does not belong to this strategy")
+                raise ResourceNotFoundException(
+                    "Research run not found or does not belong to this strategy"
+                )
 
-        new_note = ResearchNote(
-            strategy_id=strategy_id,
-            run_id=run_id,
-            content=content
-        )
+        new_note = ResearchNote(strategy_id=strategy_id, run_id=run_id, content=content)
         self.strategy_repository.session.add(new_note)
         await self.strategy_repository.session.commit()
         return 201, ResearchNoteResponseSchema.model_validate(new_note)
@@ -1271,13 +1482,17 @@ class StrategyService:
 
         from app.modules.strategy_service.models.research_note_model import ResearchNote
 
-        strategy = await self.strategy_repository.get_by_user_and_id(user_id, strategy_id)
+        strategy = await self.strategy_repository.get_by_user_and_id(
+            user_id, strategy_id
+        )
         if not strategy or strategy.is_archived:
             raise ResourceNotFoundException("Strategy not found")
 
-        stmt = select(ResearchNote).where(
-            ResearchNote.strategy_id == strategy_id
-        ).order_by(ResearchNote.created_at.desc())
+        stmt = (
+            select(ResearchNote)
+            .where(ResearchNote.strategy_id == strategy_id)
+            .order_by(ResearchNote.created_at.desc())
+        )
         res = await self.strategy_repository.session.execute(stmt)
         notes = res.scalars().all()
         return 200, [ResearchNoteResponseSchema.model_validate(n) for n in notes]
@@ -1290,7 +1505,9 @@ class StrategyService:
 
         from app.modules.strategy_service.models.research_note_model import ResearchNote
 
-        strategy = await self.strategy_repository.get_by_user_and_id(user_id, strategy_id)
+        strategy = await self.strategy_repository.get_by_user_and_id(
+            user_id, strategy_id
+        )
         if not strategy or strategy.is_archived:
             raise ResourceNotFoundException("Strategy not found")
 
@@ -1298,12 +1515,13 @@ class StrategyService:
         if not run or run.strategy_id != strategy_id:
             raise ResourceNotFoundException("Research run not found")
 
-        stmt = select(ResearchNote).where(
-            ResearchNote.strategy_id == strategy_id,
-            ResearchNote.run_id == run_id
-        ).order_by(ResearchNote.created_at.desc())
+        stmt = (
+            select(ResearchNote)
+            .where(
+                ResearchNote.strategy_id == strategy_id, ResearchNote.run_id == run_id
+            )
+            .order_by(ResearchNote.created_at.desc())
+        )
         res = await self.strategy_repository.session.execute(stmt)
         notes = res.scalars().all()
         return 200, [ResearchNoteResponseSchema.model_validate(n) for n in notes]
-
-

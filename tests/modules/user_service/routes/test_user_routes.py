@@ -47,6 +47,7 @@ class TestGetCurrentUser:
             created_at=datetime.now(UTC),
             updated_at=datetime.now(UTC),
         )
+
         async def mock_get_profile(*args, **kwargs):
             return 200, user_schema
 
@@ -88,6 +89,7 @@ class TestUpdateCurrentUser:
             created_at=datetime.now(UTC),
             updated_at=datetime.now(UTC),
         )
+
         async def mock_update_profile(*args, **kwargs):
             return 200, user_schema
 

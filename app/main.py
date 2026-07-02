@@ -22,7 +22,7 @@ app.add_middleware(
         "http://localhost:3000",
         "http://localhost:3001",
         "https://crypalgos.com",
-        "https://www.crypalgos.com"
+        "https://www.crypalgos.com",
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -53,48 +53,52 @@ from crypalgos_core.database import (
 _CONFIG_CACHE: Dict[str, Any] = {"timestamp": 0, "data": None}
 CACHE_TTL = 300  # 5 minutes
 
+
 @app.get("/api/v1/config/registry")
 async def get_config_registry() -> dict:
     """Centralized configuration registry for the platform"""
     current_time = time.time()
     if _CONFIG_CACHE["data"] and current_time - _CONFIG_CACHE["timestamp"] < CACHE_TTL:
         return {"status": "success", "data": _CONFIG_CACHE["data"]}
-        
+
     dynamic_brokers = copy.deepcopy(BROKER_REGISTRY)
     timeframes = list(TIMEFRAME_TO_CLICKHOUSE_INTERVAL.keys())
-    
+
     try:
         client = get_clickhouse_client()
-        result = client.query("SELECT DISTINCT symbol, exchange FROM crypalogs.ohlcv_1m")
+        result = client.query(
+            "SELECT DISTINCT symbol, exchange FROM crypalogs.ohlcv_1m"
+        )
         db_symbols = {}
         for row in result.result_rows:
             sym, exch = str(row[0]), str(row[1])
             if exch not in db_symbols:
                 db_symbols[exch] = []
-            
+
             clean_sym = sym.replace("_PERP", "").replace("_SPOT", "").replace("Q", "")
             coin = clean_sym.replace("USD", "").replace("USDT", "").lower()
             if coin == clean_sym.lower():
                 coin = clean_sym.lower()[:3]
-                
-            db_symbols[exch].append({
-                "symbol": sym,
-                "name": clean_sym,
-                "coin": coin
-            })
-            
+
+            db_symbols[exch].append({"symbol": sym, "name": clean_sym, "coin": coin})
+
         for exch, symbols in db_symbols.items():
             if exch in dynamic_brokers:
                 # If Delta Exchange has perpetual supported, prioritize placing them there
-                if 'perpetual' in dynamic_brokers[exch]['instruments'] and exch == 'delta':
-                    dynamic_brokers[exch]['instruments']['perpetual'] = symbols
-                elif 'futures' in dynamic_brokers[exch]['instruments']:
-                    dynamic_brokers[exch]['instruments']['futures'] = symbols
+                if (
+                    "perpetual" in dynamic_brokers[exch]["instruments"]
+                    and exch == "delta"
+                ):
+                    dynamic_brokers[exch]["instruments"]["perpetual"] = symbols
+                elif "futures" in dynamic_brokers[exch]["instruments"]:
+                    dynamic_brokers[exch]["instruments"]["futures"] = symbols
                 else:
-                    dynamic_brokers[exch]['instruments']['spot'] = symbols
+                    dynamic_brokers[exch]["instruments"]["spot"] = symbols
     except Exception as e:
-        logging.getLogger("API").error(f"Failed to fetch dynamic symbols from ClickHouse: {e}")
-    
+        logging.getLogger("API").error(
+            f"Failed to fetch dynamic symbols from ClickHouse: {e}"
+        )
+
     data = {
         "indicators": INDICATOR_REGISTRY,
         "brokers": dynamic_brokers,
@@ -102,18 +106,15 @@ async def get_config_registry() -> dict:
         "nodeOutputs": {
             "dataNode": {
                 "dataType": "OHLCV",
-                "fields": ["timestamp_ms", "open", "high", "low", "close", "volume"]
+                "fields": ["timestamp_ms", "open", "high", "low", "close", "volume"],
             }
-        }
+        },
     }
-    
+
     _CONFIG_CACHE["data"] = data
     _CONFIG_CACHE["timestamp"] = current_time
-    
-    return {
-        "status": "success",
-        "data": data
-    }
+
+    return {"status": "success", "data": data}
 
 
 @app.get("/favicon.ico", include_in_schema=False)

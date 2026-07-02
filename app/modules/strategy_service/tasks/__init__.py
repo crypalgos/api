@@ -11,5 +11,5 @@ __all__ = [
     "_execute_backtest_internal",
     "run_optimization_task",
     "run_walkforward_task",
-    "run_montecarlo_task"
+    "run_montecarlo_task",
 ]

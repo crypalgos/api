@@ -114,7 +114,9 @@ class TestSessionServiceDeleteSession:
 
         # Act & Assert
         with pytest.raises(ResourceNotFoundException) as exc_info:
-            await session_service.delete_session("nonexistent-user-id", "session-id", "dummy_refresh_token")
+            await session_service.delete_session(
+                "nonexistent-user-id", "session-id", "dummy_refresh_token"
+            )
 
         assert "User not found" in str(exc_info.value)
 
@@ -133,7 +135,9 @@ class TestSessionServiceDeleteSession:
 
         # Act & Assert
         with pytest.raises(ResourceNotFoundException) as exc_info:
-            await session_service.delete_session(sample_user.id, "nonexistent-session", "dummy_refresh_token")
+            await session_service.delete_session(
+                sample_user.id, "nonexistent-session", "dummy_refresh_token"
+            )
 
         assert "Session not found" in str(exc_info.value)
 
@@ -154,7 +158,9 @@ class TestSessionServiceDeleteSession:
 
         # Act & Assert
         with pytest.raises(ResourceNotFoundException) as exc_info:
-            await session_service.delete_session(sample_user.id, sample_session.id, "dummy_refresh_token")
+            await session_service.delete_session(
+                sample_user.id, sample_session.id, "dummy_refresh_token"
+            )
 
         assert "Session not found" in str(exc_info.value)
 
@@ -197,9 +203,8 @@ class TestSessionServiceDeleteAllSessions:
 
         # Act & Assert
         with pytest.raises(ResourceNotFoundException) as exc_info:
-            await session_service.delete_all_sessions("nonexistent-user-id", "dummy_refresh_token")
+            await session_service.delete_all_sessions(
+                "nonexistent-user-id", "dummy_refresh_token"
+            )
 
         assert "User not found" in str(exc_info.value)
-
-
-

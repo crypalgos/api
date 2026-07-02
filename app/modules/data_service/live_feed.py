@@ -6,6 +6,7 @@ import zmq.asyncio
 
 logger = logging.getLogger(__name__)
 
+
 class LiveFeedSubscriber:
     def __init__(self, address: str = "ipc:///tmp/data_streamer.ipc"):
         self.address = address
@@ -26,7 +27,7 @@ class LiveFeedSubscriber:
     async def start(self):
         if self.is_running:
             return
-            
+
         logger.info(f"Connecting LiveFeedSubscriber to ZMQ at {self.address}...")
         self.socket.connect(self.address)
         # Subscribe to all topics
@@ -40,12 +41,12 @@ class LiveFeedSubscriber:
                 topic_bytes, data_bytes = await self.socket.recv_multipart()
                 topic = topic_bytes.decode("utf-8")
                 data_str = data_bytes.decode("utf-8")
-                
+
                 try:
                     data = json.loads(data_str)
                 except Exception:
                     data = data_str
-                    
+
                 for cb in self.callbacks:
                     try:
                         if asyncio.iscoroutinefunction(cb):
@@ -71,6 +72,7 @@ class LiveFeedSubscriber:
         self.socket.close()
         self.context.term()
         logger.info("LiveFeedSubscriber stopped")
+
 
 # Global singleton
 live_feed_subscriber = LiveFeedSubscriber()

@@ -11,6 +11,7 @@ from app.modules.strategy_service.models.strategy_model import Strategy
 
 logger = logging.getLogger(__name__)
 
+
 def run_in_sandbox(
     strategy: Strategy,
     exchange: str,
@@ -18,7 +19,7 @@ def run_in_sandbox(
     start_date: datetime,
     end_date: datetime,
     initial_capital: float,
-    leverage: int
+    leverage: int,
 ) -> dict[str, Any]:
     """
     Executes a backtest in a secure Docker gVisor sandbox.
@@ -33,18 +34,18 @@ def run_in_sandbox(
                 ds_sym = data.get("symbol", "BTCUSD").replace("/", "").upper()
                 if ds_sym.endswith("USDT"):
                     ds_sym = ds_sym[:-1]
-                datasources.append({
-                    "symbol": ds_sym,
-                    "exchange": data.get("source", "delta").lower(),
-                    "timeframe": data.get("timeframe", "1m")
-                })
-    
+                datasources.append(
+                    {
+                        "symbol": ds_sym,
+                        "exchange": data.get("source", "delta").lower(),
+                        "timeframe": data.get("timeframe", "1m"),
+                    }
+                )
+
     if not datasources:
-        datasources = [{
-            "symbol": symbol.upper(),
-            "exchange": exchange.lower(),
-            "timeframe": "1m"
-        }]
+        datasources = [
+            {"symbol": symbol.upper(), "exchange": exchange.lower(), "timeframe": "1m"}
+        ]
 
     # 2. Prefetch all required market data on host using secure database connection
     from crypalgos_core.database import (
@@ -67,11 +68,13 @@ def run_in_sandbox(
             symbol=ds_sym,
             start_date=start_date,
             end_date=end_date,
-            timeframe=ds_tf
+            timeframe=ds_tf,
         )
         if candles_np is None or len(candles_np) == 0:
-            raise ValueError(f"No historical candles found in ClickHouse for {ds_sym} on {ds_exch}")
-        
+            raise ValueError(
+                f"No historical candles found in ClickHouse for {ds_sym} on {ds_exch}"
+            )
+
         key = f"{ds_exch.lower()}_{ds_sym.upper()}_{ds_tf.lower()}"
         candles_dict[key] = candles_np.tolist()
 
@@ -80,7 +83,7 @@ def run_in_sandbox(
                 exchange=ds_exch,
                 symbol=ds_sym,
                 start_date=start_date,
-                end_date=end_date
+                end_date=end_date,
             )
             funding_dict[ds_sym.upper()] = funding_list
         except Exception as fe:
@@ -88,7 +91,7 @@ def run_in_sandbox(
 
     greeks_list = []
     mark_list = []
-    
+
     # Conditionally fetch options datasets only if options are referenced in the strategy canvas
     has_options = False
     if strategy.canvas_json:
@@ -101,22 +104,28 @@ def run_in_sandbox(
 
     if has_options:
         try:
-            greeks_list = load_option_greeks_from_clickhouse(exchange.lower(), start_date, end_date)
+            greeks_list = load_option_greeks_from_clickhouse(
+                exchange.lower(), start_date, end_date
+            )
         except Exception as ge:
             logger.warning(f"Option greeks prefetch failed: {ge}")
 
         try:
-            mark_list = load_option_mark_prices_from_clickhouse(exchange.lower(), start_date, end_date)
+            mark_list = load_option_mark_prices_from_clickhouse(
+                exchange.lower(), start_date, end_date
+            )
         except Exception as me:
             logger.warning(f"Option mark prefetch failed: {me}")
     else:
-        logger.info("Skipping option greeks and option mark prices prefetch (no options data nodes in canvas).")
+        logger.info(
+            "Skipping option greeks and option mark prices prefetch (no options data nodes in canvas)."
+        )
 
     market_data = {
         "candles": candles_dict,
         "funding_rates": funding_dict,
         "option_greeks": greeks_list,
-        "option_mark_prices": mark_list
+        "option_mark_prices": mark_list,
     }
 
     # 3. Create host mount directory within workspace root for Docker volume isolation
@@ -124,7 +133,7 @@ def run_in_sandbox(
     workspace_root = os.getenv("WORKSPACE_ROOT", "/sandbox_tmp")
     host_workspace_root = os.getenv("HOST_WORKSPACE_ROOT", workspace_root)
     sandbox_image = os.getenv("SANDBOX_IMAGE", "api-api")
-    
+
     sandbox_dir = os.path.join(workspace_root, f"sandbox_tmp_{sandbox_id}")
     host_sandbox_dir = os.path.join(host_workspace_root, f"sandbox_tmp_{sandbox_id}")
     os.makedirs(sandbox_dir, exist_ok=True)
@@ -142,7 +151,7 @@ def run_in_sandbox(
             "start_date": start_date.isoformat(),
             "end_date": end_date.isoformat(),
             "initial_capital": initial_capital,
-            "leverage": leverage
+            "leverage": leverage,
         }
         with open(os.path.join(sandbox_dir, "params.json"), "w") as f:
             json.dump(params, f)
@@ -248,17 +257,21 @@ if __name__ == "__main__":
 
         # 4. Trigger docker execution with network disabled, read-only root, and runsc runtime
         cmd = [
-            "docker", "run", "--rm",
+            "docker",
+            "run",
+            "--rm",
             "--runtime=runsc",
             "--network=none",
             "--read-only",
             "--memory=1g",
             "--cpus=1.0",
-            "-v", f"{host_sandbox_dir}:/sandbox",
+            "-v",
+            f"{host_sandbox_dir}:/sandbox",
             sandbox_image,
-            "/app/.venv/bin/python", "/sandbox/sandbox_runner.py"
+            "/app/.venv/bin/python",
+            "/sandbox/sandbox_runner.py",
         ]
-        
+
         logger.info(f"Triggering secure strategy sandbox container: {' '.join(cmd)}")
         res = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
 
@@ -273,7 +286,9 @@ if __name__ == "__main__":
         elif os.path.exists(error_path):
             with open(error_path, "r") as f:
                 err_info = json.load(f)
-            raise ValueError(f"Sandbox strategy runtime exception: {err_info.get('error')}\n{err_info.get('traceback')}")
+            raise ValueError(
+                f"Sandbox strategy runtime exception: {err_info.get('error')}\n{err_info.get('traceback')}"
+            )
         else:
             stderr_out = res.stderr or ""
             stdout_out = res.stdout or ""

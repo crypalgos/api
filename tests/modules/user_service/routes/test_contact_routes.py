@@ -33,6 +33,7 @@ def mock_contact_service() -> MagicMock:
 @pytest.fixture
 def override_contact_service(mock_contact_service: MagicMock):
     """Override the contact service dependency."""
+
     async def _get_contact_service_override():
         return mock_contact_service
 
@@ -45,6 +46,7 @@ def override_contact_service(mock_contact_service: MagicMock):
 @pytest.fixture
 def override_admin_user():
     """Override the get_admin_user dependency to return a mock admin."""
+
     async def _get_admin_user_override():
         return {"user_id": "admin-id", "email": "ashishjangde54@gmail.com"}
 
@@ -106,7 +108,10 @@ class TestContactAdminActions:
     """Tests for admin contact panel actions (retrieval and resolution)."""
 
     def test_get_messages_as_admin(
-        self, client: TestClient, override_contact_service: MagicMock, override_admin_user
+        self,
+        client: TestClient,
+        override_contact_service: MagicMock,
+        override_admin_user,
     ) -> None:
         """Test admin retrieving contact messages."""
         mock_data = {
@@ -138,7 +143,10 @@ class TestContactAdminActions:
         assert data["data"]["items"][0]["name"] == "Alice Smith"
 
     def test_resolve_message_as_admin(
-        self, client: TestClient, override_contact_service: MagicMock, override_admin_user
+        self,
+        client: TestClient,
+        override_contact_service: MagicMock,
+        override_admin_user,
     ) -> None:
         """Test admin resolving (deleting) a contact message."""
         override_contact_service.delete_message.return_value = (

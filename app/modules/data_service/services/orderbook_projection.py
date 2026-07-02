@@ -8,11 +8,13 @@ from typing import Dict, List, Tuple, Optional
 
 ORDERBOOK_SCHEMA_VERSION = 1
 
+
 class OrderBookStatus(str, Enum):
     ACTIVE = "ACTIVE"
     STALE = "STALE"
     OUT_OF_SYNC = "OUT_OF_SYNC"
     RECONNECTING = "RECONNECTING"
+
 
 class MarketType(str, Enum):
     SPOT = "SPOT"
@@ -20,9 +22,11 @@ class MarketType(str, Enum):
     FUTURES = "FUTURES"
     OPTIONS = "OPTIONS"
 
+
 class OptionType(str, Enum):
     CALL = "CALL"
     PUT = "PUT"
+
 
 @dataclass(frozen=True, slots=True)
 class InstrumentId:
@@ -42,8 +46,9 @@ class InstrumentId:
             "underlying": self.underlying,
             "expiry": self.expiry.isoformat() if self.expiry else None,
             "strike": float(self.strike) if self.strike else None,
-            "option_type": self.option_type.value if self.option_type else None
+            "option_type": self.option_type.value if self.option_type else None,
         }
+
 
 @dataclass(frozen=True, slots=True)
 class InstrumentMetadata:
@@ -59,6 +64,7 @@ class InstrumentMetadata:
     strike: Optional[Decimal] = None
     option_type: Optional[OptionType] = None
 
+
 @dataclass(frozen=True)
 class ExchangeCapabilities:
     supports_spot: bool
@@ -69,10 +75,12 @@ class ExchangeCapabilities:
     supports_post_only: bool
     supports_trigger_orders: bool
 
+
 @dataclass(frozen=True, slots=True)
 class OrderBookLevel:
     price: Decimal
     size: Decimal
+
 
 @dataclass(frozen=True, slots=True)
 class OrderBookSnapshot:
@@ -85,7 +93,9 @@ class OrderBookSnapshot:
     status: OrderBookStatus = OrderBookStatus.ACTIVE
     schema_version: int = ORDERBOOK_SCHEMA_VERSION
 
+
 logger = logging.getLogger(__name__)
+
 
 class OrderBookProjection:
     def __init__(self, instrument: InstrumentId):
@@ -97,11 +107,23 @@ class OrderBookProjection:
         self.received_at: int = 0
         self.status: OrderBookStatus = OrderBookStatus.ACTIVE
 
-    def apply_update(self, bids_delta: List[List[Decimal]], asks_delta: List[List[Decimal]], sequence: int, timestamp: int) -> bool:
+    def apply_update(
+        self,
+        bids_delta: List[List[Decimal]],
+        asks_delta: List[List[Decimal]],
+        sequence: int,
+        timestamp: int,
+    ) -> bool:
         """Applies incremental updates. Returns True if order book top levels pricing/sizing changed."""
         # Check sequencing gaps
-        if self.last_sequence != -1 and sequence != self.last_sequence + 1 and sequence != self.last_sequence:
-            logger.warning(f"Sequence gap detected on {self.instrument.symbol}: expected {self.last_sequence + 1}, got {sequence}. Marking OUT_OF_SYNC.")
+        if (
+            self.last_sequence != -1
+            and sequence != self.last_sequence + 1
+            and sequence != self.last_sequence
+        ):
+            logger.warning(
+                f"Sequence gap detected on {self.instrument.symbol}: expected {self.last_sequence + 1}, got {sequence}. Marking OUT_OF_SYNC."
+            )
             self.status = OrderBookStatus.OUT_OF_SYNC
             # Return True to publish out-of-sync alert
             return True
@@ -131,7 +153,7 @@ class OrderBookProjection:
         # Return True only if top-level bid/ask pricing or sizing changed
         new_top_bid = self.get_top_level(is_bid=True)
         new_top_ask = self.get_top_level(is_bid=False)
-        
+
         return old_top_bid != new_top_bid or old_top_ask != new_top_ask
 
     def get_top_level(self, is_bid: bool) -> Optional[Tuple[Decimal, Decimal]]:
@@ -148,23 +170,29 @@ class OrderBookProjection:
         current_time_ms = int(time.time() * 1000)
         if self.received_at > 0 and (current_time_ms - self.received_at) > 10000:
             if self.status == OrderBookStatus.ACTIVE:
-                logger.warning(f"OrderBook projection for {self.instrument.symbol} is stale.")
+                logger.warning(
+                    f"OrderBook projection for {self.instrument.symbol} is stale."
+                )
                 self.status = OrderBookStatus.STALE
 
     def get_snapshot(self, depth: int = 20) -> OrderBookSnapshot:
         self.check_staleness()
-        
+
         # Enforce allowed depths (10, 20, 50)
         if depth not in (10, 20, 50):
             depth = 20
 
         # Sort Bids descending (highest price first)
         sorted_bids = sorted(self.bids.keys(), reverse=True)[:depth]
-        bids_levels = tuple(OrderBookLevel(price=p, size=self.bids[p]) for p in sorted_bids)
+        bids_levels = tuple(
+            OrderBookLevel(price=p, size=self.bids[p]) for p in sorted_bids
+        )
 
         # Sort Asks ascending (lowest price first)
         sorted_asks = sorted(self.asks.keys(), reverse=False)[:depth]
-        asks_levels = tuple(OrderBookLevel(price=p, size=self.asks[p]) for p in sorted_asks)
+        asks_levels = tuple(
+            OrderBookLevel(price=p, size=self.asks[p]) for p in sorted_asks
+        )
 
         return OrderBookSnapshot(
             instrument=self.instrument,
@@ -173,21 +201,27 @@ class OrderBookProjection:
             received_at=self.received_at,
             bids=bids_levels,
             asks=asks_levels,
-            status=self.status
+            status=self.status,
         )
+
 
 class OrderBookProjectionRegistry:
     def __init__(self):
         self._projections: Dict[str, OrderBookProjection] = {}
 
-    def get_projection(self, exchange: str, symbol: str, market_type: MarketType = MarketType.PERPETUAL) -> OrderBookProjection:
+    def get_projection(
+        self, exchange: str, symbol: str, market_type: MarketType = MarketType.PERPETUAL
+    ) -> OrderBookProjection:
         if market_type != MarketType.PERPETUAL:
             raise NotImplementedError("Only perpetual futures are supported in v1.0")
         key = f"{exchange}:{market_type.value}:{symbol}"
         if key not in self._projections:
-            instrument = InstrumentId(exchange=exchange, market_type=market_type, symbol=symbol)
+            instrument = InstrumentId(
+                exchange=exchange, market_type=market_type, symbol=symbol
+            )
             self._projections[key] = OrderBookProjection(instrument)
         return self._projections[key]
+
 
 # Global projection registry singleton
 orderbook_registry = OrderBookProjectionRegistry()

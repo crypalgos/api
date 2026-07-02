@@ -24,7 +24,6 @@ if TYPE_CHECKING:
     )
 
 
-
 class ResearchRun(Base):
     __tablename__ = "research_runs"
     __table_args__ = (
@@ -44,9 +43,11 @@ class ResearchRun(Base):
         String(150),
         ForeignKey("strategies.id", ondelete="CASCADE"),
         nullable=False,
-        index=True
+        index=True,
     )
-    run_type: Mapped[str] = mapped_column(String(32), nullable=False)  # BACKTEST, OPTIMIZATION, WALKFORWARD, MONTECARLO
+    run_type: Mapped[str] = mapped_column(
+        String(32), nullable=False
+    )  # BACKTEST, OPTIMIZATION, WALKFORWARD, MONTECARLO
     run_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     artifact_size_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     compiled_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
@@ -63,13 +64,19 @@ class ResearchRun(Base):
     progress_percent: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     progress_json: Mapped[Dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     report_version: Mapped[str | None] = mapped_column(String(32), nullable=True)
-    
-    artifact_manifest: Mapped[Dict[str, Any] | None] = mapped_column(JSON, nullable=True)
-    
+
+    artifact_manifest: Mapped[Dict[str, Any] | None] = mapped_column(
+        JSON, nullable=True
+    )
+
     summary_json: Mapped[Dict[str, Any] | None] = mapped_column(JSON, nullable=True)
 
-    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -81,16 +88,21 @@ class ResearchRun(Base):
     )
 
     # Relationships
-    strategy: Mapped["Strategy"] = relationship("Strategy", back_populates="research_runs")
-    strategy_version: Mapped[Optional["StrategyVersion"]] = relationship("StrategyVersion", back_populates="research_runs")
+    strategy: Mapped["Strategy"] = relationship(
+        "Strategy", back_populates="research_runs"
+    )
+    strategy_version: Mapped[Optional["StrategyVersion"]] = relationship(
+        "StrategyVersion", back_populates="research_runs"
+    )
     parent_run_id: Mapped[str | None] = mapped_column(
         String(150),
         ForeignKey("research_runs.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
     )
-    parent_run: Mapped[Optional["ResearchRun"]] = relationship("ResearchRun", remote_side=[id])
-
+    parent_run: Mapped[Optional["ResearchRun"]] = relationship(
+        "ResearchRun", remote_side=[id]
+    )
 
 
 # Import here to avoid circular imports during mapper initialization
@@ -133,7 +145,9 @@ class StrategyLatestResults(Base):
     )
 
     # Relationships
-    strategy: Mapped["Strategy"] = relationship("Strategy", back_populates="latest_results")
+    strategy: Mapped["Strategy"] = relationship(
+        "Strategy", back_populates="latest_results"
+    )
     latest_backtest: Mapped[Optional[ResearchRun]] = relationship(
         "ResearchRun", foreign_keys=[latest_backtest_id]
     )

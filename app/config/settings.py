@@ -59,8 +59,12 @@ class Settings(BaseSettings):
     resend_from_name: str = "CrypAlgos Platform"
     google_client_id: str = ""
     google_client_secret: str = ""
-    sandbox_enabled: bool = False  # Set SANDBOX_ENABLED=true in .env.prod for Docker gVisor path
-    encryption_key: str = "T3N0Z3J4VzVzOGM5ZDEyMzQ1Njc4OWFiY2RlZmdoaWprbG1ub3BxcnN0dXY=" # default 32-byte urlsafe base64 key
+    sandbox_enabled: bool = (
+        False  # Set SANDBOX_ENABLED=true in .env.prod for Docker gVisor path
+    )
+    encryption_key: str = (
+        "T3N0Z3J4VzVzOGM5ZDEyMzQ1Njc4OWFiY2RlZmdoaWprbG1ub3BxcnN0dXY="  # default 32-byte urlsafe base64 key
+    )
     s3_bucket_name: str = ""
     aws_access_key_id: str = ""
     aws_secret_access_key: str = ""

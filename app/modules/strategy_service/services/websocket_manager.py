@@ -5,6 +5,7 @@ from fastapi import WebSocket
 
 logger = logging.getLogger(__name__)
 
+
 class WebsocketManager:
     def __init__(self):
         # Maps run_id -> list of active WebSockets
@@ -34,11 +35,15 @@ class WebsocketManager:
             "event_type": event.__class__.__name__,
             "timestamp": getattr(event, "timestamp", 0),
             "symbol": getattr(event, "symbol_id", ""),
-            "data": {k: (v.name if hasattr(v, "name") else v) for k, v in event.__dict__.items() if k != "context"}
+            "data": {
+                k: (v.name if hasattr(v, "name") else v)
+                for k, v in event.__dict__.items()
+                if k != "context"
+            },
         }
-        
+
         message_str = json.dumps(payload)
-        
+
         # Broadcast to all connected websockets for this run_id
         for connection in list(self.active_connections[run_id]):
             try:
@@ -46,6 +51,7 @@ class WebsocketManager:
             except Exception as e:
                 logger.error(f"Error sending WebSocket message: {e}")
                 self.disconnect(run_id, connection)
+
 
 # Global singleton
 websocket_manager = WebsocketManager()

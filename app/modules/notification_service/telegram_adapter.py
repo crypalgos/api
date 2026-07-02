@@ -5,6 +5,7 @@ from app.config.settings import settings
 
 logger = logging.getLogger(__name__)
 
+
 class TelegramAdapter:
     def __init__(self, bot_token: Optional[str] = None, chat_id: Optional[str] = None):
         self.bot_token = bot_token or settings.get("TELEGRAM_BOT_TOKEN", "")
@@ -14,15 +15,13 @@ class TelegramAdapter:
     async def send_message(self, message: str, chat_id: Optional[str] = None) -> bool:
         target_chat = chat_id or self.chat_id
         if not self.bot_token or not target_chat:
-            logger.warning("Telegram Bot Token or Chat ID not configured; skipping notification.")
+            logger.warning(
+                "Telegram Bot Token or Chat ID not configured; skipping notification."
+            )
             return False
 
         url = f"{self.base_url}/sendMessage"
-        payload = {
-            "chat_id": target_chat,
-            "text": message,
-            "parse_mode": "HTML"
-        }
+        payload = {"chat_id": target_chat, "text": message, "parse_mode": "HTML"}
 
         async with httpx.AsyncClient(timeout=10) as client:
             try:
@@ -33,6 +32,7 @@ class TelegramAdapter:
             except Exception as e:
                 logger.error(f"Failed to send Telegram alert: {e}")
                 return False
+
 
 # Global singleton
 telegram_adapter = TelegramAdapter()

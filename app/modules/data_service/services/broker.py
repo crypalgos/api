@@ -5,6 +5,7 @@ import zmq.asyncio
 
 logger = logging.getLogger(__name__)
 
+
 class ZMQBroker:
     def __init__(self, address: str = "ipc:///tmp/data_streamer.ipc"):
         self.address = address
@@ -24,12 +25,11 @@ class ZMQBroker:
     async def publish(self, topic: str, data: str):
         if not self.is_running:
             return
-        
+
         try:
-            await self.socket.send_multipart([
-                topic.encode("utf-8"),
-                data.encode("utf-8")
-            ])
+            await self.socket.send_multipart(
+                [topic.encode("utf-8"), data.encode("utf-8")]
+            )
         except Exception as e:
             logger.error(f"Error publishing to ZMQ: {e}")
 

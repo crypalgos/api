@@ -31,6 +31,7 @@ from app.modules.strategy_service.tasks.task_utils import (
 
 logger = logging.getLogger(__name__)
 
+
 async def _execute_walkforward_internal(
     run_id: str,
     strategy_id: str,
@@ -44,8 +45,9 @@ async def _execute_walkforward_internal(
     async with job_lifecycle_context(run_id, "Walk-forward task"):
         # Load and compile strategy
         async with AsyncSessionLocal() as session:
-            strat_class = await load_and_compile_strategy(strategy_id, session, strategy_version_id=strategy_version_id)
-
+            strat_class = await load_and_compile_strategy(
+                strategy_id, session, strategy_version_id=strategy_version_id
+            )
 
         # Build optimization config from stored parameter_space
         parameter_space_json = window_config_json.get("parameter_space", [])
@@ -68,7 +70,11 @@ async def _execute_walkforward_internal(
             data_start=start_date,
             data_end=end_date,
             initial_capital=initial_capital,
-            leverage=next(iter(getattr(strat_class, "datasources", {}).values()), {}).get("leverage", 1),  # type: ignore[call-overload]
+            leverage=next(
+                iter(getattr(strat_class, "datasources", {}).values()), {}
+            ).get(
+                "leverage", 1
+            ),  # type: ignore[call-overload]
         )
         validate_walk_forward_job(job)
 
@@ -77,7 +83,9 @@ async def _execute_walkforward_internal(
         dataset_ids = []
         timeframe = "1m"
         leverage = 1
-        if hasattr(strat_class, "datasources") and isinstance(strat_class.datasources, dict):
+        if hasattr(strat_class, "datasources") and isinstance(
+            strat_class.datasources, dict
+        ):
             for ds_name, ds_info in strat_class.datasources.items():
                 if isinstance(ds_info, dict):
                     sym = ds_info.get("symbol")
@@ -96,6 +104,7 @@ async def _execute_walkforward_internal(
         # Compute comprehensive run hash
         import hashlib
         import json
+
         hash_payload = {
             "strategy_version_id": strategy_version_id,
             "dataset_ids": sorted(dataset_ids),
@@ -136,6 +145,7 @@ async def _execute_walkforward_internal(
             "objective": objective,
         }
         from dataclasses import asdict
+
         report_payload = {
             "report": asdict(report),
             "windows_count": len(result.windows),
@@ -143,9 +153,12 @@ async def _execute_walkforward_internal(
 
         # Measure size of S3 artifacts
         import msgpack
+
         artifact_size = len(msgpack.packb(report_payload, use_bin_type=True))
 
-        metadata_key = f"research/{strategy_id}/walkforwards/{run_id}/metadata.msgpack.zstd"
+        metadata_key = (
+            f"research/{strategy_id}/walkforwards/{run_id}/metadata.msgpack.zstd"
+        )
         report_key = f"research/{strategy_id}/walkforwards/{run_id}/report.msgpack.zstd"
 
         await storage_service.upload_payload(metadata_key, meta_payload)
@@ -154,11 +167,27 @@ async def _execute_walkforward_internal(
         # Build database summary (extract validation metrics from the walkforward report's aggregate_metrics)
         summary_json = {
             "net_profit": float(report.aggregate_metrics.get("mean_net_profit", 0.0)),
-            "total_return_pct": float(report.aggregate_metrics.get("mean_total_return_pct", 0.0)),
-            "sharpe_ratio": float(report.aggregate_metrics.get("mean_sharpe_ratio", 0.0)) if report.aggregate_metrics.get("mean_sharpe_ratio") is not None else None,
-            "sortino_ratio": float(report.aggregate_metrics.get("mean_sortino_ratio", 0.0)) if report.aggregate_metrics.get("mean_sortino_ratio") is not None else None,
-            "calmar_ratio": float(report.aggregate_metrics.get("mean_calmar_ratio", 0.0)) if report.aggregate_metrics.get("mean_calmar_ratio") is not None else None,
-            "max_drawdown_pct": float(report.aggregate_metrics.get("mean_max_drawdown", 0.0)),
+            "total_return_pct": float(
+                report.aggregate_metrics.get("mean_total_return_pct", 0.0)
+            ),
+            "sharpe_ratio": (
+                float(report.aggregate_metrics.get("mean_sharpe_ratio", 0.0))
+                if report.aggregate_metrics.get("mean_sharpe_ratio") is not None
+                else None
+            ),
+            "sortino_ratio": (
+                float(report.aggregate_metrics.get("mean_sortino_ratio", 0.0))
+                if report.aggregate_metrics.get("mean_sortino_ratio") is not None
+                else None
+            ),
+            "calmar_ratio": (
+                float(report.aggregate_metrics.get("mean_calmar_ratio", 0.0))
+                if report.aggregate_metrics.get("mean_calmar_ratio") is not None
+                else None
+            ),
+            "max_drawdown_pct": float(
+                report.aggregate_metrics.get("mean_max_drawdown", 0.0)
+            ),
             "trade_count": int(report.aggregate_metrics.get("mean_trade_count", 0)),
             "windows_count": len(result.windows),
         }
@@ -184,8 +213,11 @@ async def _execute_walkforward_internal(
                     session.add(latest)
                 latest.latest_walkforward_id = run_id
 
-        logger.info(f"Walk-forward run {run_id} completed with {len(result.windows)} windows.")
+        logger.info(
+            f"Walk-forward run {run_id} completed with {len(result.windows)} windows."
+        )
         return {"success": True, "run_id": run_id, "windows": len(result.windows)}
+
 
 @celery_app.task(name="app.modules.strategy_service.tasks.run_walkforward_task")
 def run_walkforward_task(
@@ -201,14 +233,15 @@ def run_walkforward_task(
     """Celery background task for walk-forward out-of-sample validation."""
     start_date = datetime.fromisoformat(start_date_iso)
     end_date = datetime.fromisoformat(end_date_iso)
-    return asyncio.run(_execute_walkforward_internal(
-        run_id=run_id,
-        strategy_id=strategy_id,
-        start_date=start_date,
-        end_date=end_date,
-        initial_capital=initial_capital,
-        window_config_json=window_config_json,
-        objective=objective,
-        strategy_version_id=strategy_version_id,
-    ))
-
+    return asyncio.run(
+        _execute_walkforward_internal(
+            run_id=run_id,
+            strategy_id=strategy_id,
+            start_date=start_date,
+            end_date=end_date,
+            initial_capital=initial_capital,
+            window_config_json=window_config_json,
+            objective=objective,
+            strategy_version_id=strategy_version_id,
+        )
+    )

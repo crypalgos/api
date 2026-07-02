@@ -16,7 +16,7 @@ def make_mock_strategy_schema(
     description: str = "A strategy for testing",
     canvas_json: dict = None,
     compiled_code: str = "class TestStrategy(StrategyBase): pass",
-    is_code_modified: bool = False
+    is_code_modified: bool = False,
 ) -> StrategyResponseSchema:
     return StrategyResponseSchema(
         id=strategy_id,
@@ -29,7 +29,7 @@ def make_mock_strategy_schema(
         is_template=False,
         is_archived=False,
         created_at=datetime.now(UTC),
-        updated_at=datetime.now(UTC)
+        updated_at=datetime.now(UTC),
     )
 
 
@@ -40,7 +40,7 @@ class TestStrategyRoutes:
         self,
         client: TestClient,
         override_strategy_service: MagicMock,
-        override_current_user
+        override_current_user,
     ) -> None:
         """Test successful visual strategy canvas creation."""
         mock_strategy = make_mock_strategy_schema()
@@ -49,13 +49,13 @@ class TestStrategyRoutes:
         payload = {
             "name": "Test Strategy",
             "description": "A strategy for testing",
-            "canvas_json": {"nodes": [], "edges": []}
+            "canvas_json": {"nodes": [], "edges": []},
         }
 
         response = client.post(
             "/api/v1/strategies",
             json=payload,
-            headers={"Authorization": "Bearer test_token"}
+            headers={"Authorization": "Bearer test_token"},
         )
 
         assert response.status_code == status.HTTP_201_CREATED
@@ -64,30 +64,31 @@ class TestStrategyRoutes:
             user_id="test-user-id",
             name="Test Strategy",
             description="A strategy for testing",
-            canvas_json={"nodes": [], "edges": []}
+            canvas_json={"nodes": [], "edges": []},
         )
 
     def test_list_strategies_success(
         self,
         client: TestClient,
         override_strategy_service: MagicMock,
-        override_current_user
+        override_current_user,
     ) -> None:
         """Test listing saved strategies for user."""
-        mock_list = [make_mock_strategy_schema(strategy_id="strat-1"), make_mock_strategy_schema(strategy_id="strat-2")]
-        from app.modules.strategy_service.schema.strategy_schema import PaginatedStrategiesResponseSchema
+        mock_list = [
+            make_mock_strategy_schema(strategy_id="strat-1"),
+            make_mock_strategy_schema(strategy_id="strat-2"),
+        ]
+        from app.modules.strategy_service.schema.strategy_schema import (
+            PaginatedStrategiesResponseSchema,
+        )
+
         mock_paginated = PaginatedStrategiesResponseSchema(
-            total=2,
-            strategies=mock_list,
-            current_page=1,
-            limit=8,
-            total_pages=1
+            total=2, strategies=mock_list, current_page=1, limit=8, total_pages=1
         )
         override_strategy_service.list_strategies.return_value = (200, mock_paginated)
 
         response = client.get(
-            "/api/v1/strategies",
-            headers={"Authorization": "Bearer test_token"}
+            "/api/v1/strategies", headers={"Authorization": "Bearer test_token"}
         )
 
         assert response.status_code == status.HTTP_200_OK
@@ -95,14 +96,19 @@ class TestStrategyRoutes:
         assert len(response.json()["data"]["strategies"]) == 2
         assert response.json()["data"]["strategies"][0]["id"] == "strat-1"
         override_strategy_service.list_strategies.assert_called_once_with(
-            user_id="test-user-id", page=1, limit=8, search="", is_template=None, archived=False
+            user_id="test-user-id",
+            page=1,
+            limit=8,
+            search="",
+            is_template=None,
+            archived=False,
         )
 
     def test_get_strategy_success(
         self,
         client: TestClient,
         override_strategy_service: MagicMock,
-        override_current_user
+        override_current_user,
     ) -> None:
         """Test fetching a specific strategy."""
         mock_strat = make_mock_strategy_schema(strategy_id="strat-id-123")
@@ -110,23 +116,28 @@ class TestStrategyRoutes:
 
         response = client.get(
             "/api/v1/strategies/strat-id-123",
-            headers={"Authorization": "Bearer test_token"}
+            headers={"Authorization": "Bearer test_token"},
         )
 
         assert response.status_code == status.HTTP_200_OK
         assert response.json()["data"]["id"] == "strat-id-123"
-        override_strategy_service.get_strategy.assert_called_once_with("test-user-id", "strat-id-123")
+        override_strategy_service.get_strategy.assert_called_once_with(
+            "test-user-id", "strat-id-123"
+        )
 
     def test_save_monaco_code_success(
         self,
         client: TestClient,
         override_strategy_service: MagicMock,
-        override_current_user
+        override_current_user,
     ) -> None:
         """Test saving custom edited Monaco code."""
         override_strategy_service.save_custom_code.return_value = (
             200,
-            {"success": True, "message": "Custom Monaco code saved. Visual flow is desynchronized."}
+            {
+                "success": True,
+                "message": "Custom Monaco code saved. Visual flow is desynchronized.",
+            },
         )
 
         payload = {"code": "print('custom code')"}
@@ -134,7 +145,7 @@ class TestStrategyRoutes:
         response = client.put(
             "/api/v1/strategies/strat-id-123/code",
             json=payload,
-            headers={"Authorization": "Bearer test_token"}
+            headers={"Authorization": "Bearer test_token"},
         )
 
         assert response.status_code == status.HTTP_200_OK
@@ -142,42 +153,46 @@ class TestStrategyRoutes:
         override_strategy_service.save_custom_code.assert_called_once_with(
             user_id="test-user-id",
             strategy_id="strat-id-123",
-            code="print('custom code')"
+            code="print('custom code')",
         )
 
     def test_reset_to_visual_builder_success(
         self,
         client: TestClient,
         override_strategy_service: MagicMock,
-        override_current_user
+        override_current_user,
     ) -> None:
         """Test resetting strategy state to visual builder canvas template sync."""
-        mock_strat = make_mock_strategy_schema(strategy_id="strat-id-123", is_code_modified=False)
-        override_strategy_service.reset_to_visual_builder.return_value = (200, mock_strat)
+        mock_strat = make_mock_strategy_schema(
+            strategy_id="strat-id-123", is_code_modified=False
+        )
+        override_strategy_service.reset_to_visual_builder.return_value = (
+            200,
+            mock_strat,
+        )
 
         response = client.post(
             "/api/v1/strategies/strat-id-123/reset-builder",
-            headers={"Authorization": "Bearer test_token"}
+            headers={"Authorization": "Bearer test_token"},
         )
 
         assert response.status_code == status.HTTP_200_OK
         assert response.json()["data"]["is_code_modified"] is False
         override_strategy_service.reset_to_visual_builder.assert_called_once_with(
-            "test-user-id",
-            "strat-id-123"
+            "test-user-id", "strat-id-123"
         )
 
     def test_execute_backtest_success(
         self,
         client: TestClient,
         override_strategy_service: MagicMock,
-        override_current_user
+        override_current_user,
     ) -> None:
         """Test successfully enqueuing an institutional backtest run."""
         mock_response = {
             "status": "enqueued",
             "task_id": "celery-task-id-abc",
-            "message": "Backtest enqueued successfully."
+            "message": "Backtest enqueued successfully.",
         }
         override_strategy_service.trigger_backtest.return_value = (202, mock_response)
 
@@ -190,7 +205,7 @@ class TestStrategyRoutes:
         response = client.post(
             "/api/v1/strategies/strat-id-123/backtests",
             json=payload,
-            headers={"Authorization": "Bearer test_token"}
+            headers={"Authorization": "Bearer test_token"},
         )
 
         assert response.status_code == status.HTTP_202_ACCEPTED
@@ -209,4 +224,3 @@ class TestStrategyRoutes:
         assert "exchange" not in called_args
         assert "symbol" not in called_args
         assert "leverage" not in called_args
-

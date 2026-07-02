@@ -29,6 +29,7 @@ from app.modules.strategy_service.tasks.task_utils import (
 
 logger = logging.getLogger(__name__)
 
+
 async def _execute_optimization_internal(
     run_id: str,
     strategy_id: str,
@@ -45,12 +46,14 @@ async def _execute_optimization_internal(
     async with job_lifecycle_context(run_id, "Optimization task"):
         # Load and compile strategy
         async with AsyncSessionLocal() as session:
-            strat_class = await load_and_compile_strategy(strategy_id, session, strategy_version_id=strategy_version_id)
-
+            strat_class = await load_and_compile_strategy(
+                strategy_id, session, strategy_version_id=strategy_version_id
+            )
 
         # Compute run hash for caching
         import hashlib
         import json
+
         hash_payload = {
             "strategy_version_id": strategy_version_id,
             "start_date": start_date.isoformat(),
@@ -67,16 +70,24 @@ async def _execute_optimization_internal(
 
         async with AsyncSessionLocal() as session:
             from sqlalchemy import select
-            dup_stmt = select(ResearchRun).where(
-                ResearchRun.strategy_id == strategy_id,
-                ResearchRun.run_hash == run_hash,
-                ResearchRun.status == "COMPLETED"
-            ).order_by(ResearchRun.completed_at.desc()).limit(1)
+
+            dup_stmt = (
+                select(ResearchRun)
+                .where(
+                    ResearchRun.strategy_id == strategy_id,
+                    ResearchRun.run_hash == run_hash,
+                    ResearchRun.status == "COMPLETED",
+                )
+                .order_by(ResearchRun.completed_at.desc())
+                .limit(1)
+            )
             dup_res = await session.execute(dup_stmt)
             duplicate_run = dup_res.scalar_one_or_none()
 
             if duplicate_run:
-                logger.info(f"Reusing duplicate completed optimization run {duplicate_run.id} for hash {run_hash}")
+                logger.info(
+                    f"Reusing duplicate completed optimization run {duplicate_run.id} for hash {run_hash}"
+                )
                 async with session.begin():
                     run = await session.get(ResearchRun, run_id)
                     if run:
@@ -94,7 +105,15 @@ async def _execute_optimization_internal(
                         latest = StrategyLatestResults(strategy_id=strategy_id)
                         session.add(latest)
                     latest.latest_optimization_id = run_id
-                return {"success": True, "run_id": run_id, "total_results": duplicate_run.summary_json.get("total_results", 0) if duplicate_run.summary_json else 0}
+                return {
+                    "success": True,
+                    "run_id": run_id,
+                    "total_results": (
+                        duplicate_run.summary_json.get("total_results", 0)
+                        if duplicate_run.summary_json
+                        else 0
+                    ),
+                }
 
         # Build OptimizationIR
         params = [ParameterDefinition(**p) for p in parameter_space_json]
@@ -114,10 +133,16 @@ async def _execute_optimization_internal(
             start_date=start_date,
             end_date=end_date,
             exchange=getattr(strat_class, "exchange", "delta"),
-            symbol=next(iter(getattr(strat_class, "datasources", {}).values()), {}).get("symbol", "BTCUSD"),  # type: ignore[call-overload]
+            symbol=next(iter(getattr(strat_class, "datasources", {}).values()), {}).get(
+                "symbol", "BTCUSD"
+            ),  # type: ignore[call-overload]
             opt_ir=opt_ir,
             initial_capital=initial_capital,
-            leverage=next(iter(getattr(strat_class, "datasources", {}).values()), {}).get("leverage", 1),  # type: ignore[call-overload]
+            leverage=next(
+                iter(getattr(strat_class, "datasources", {}).values()), {}
+            ).get(
+                "leverage", 1
+            ),  # type: ignore[call-overload]
         )
 
         # Setup progress flusher
@@ -150,15 +175,26 @@ async def _execute_optimization_internal(
         }
         report_payload = {
             "leaderboard": leaderboard,
-            "best_result": {"params": best.params, "metrics": best.metrics, "rank": best.rank} if best else None,
-            "total_runs": len(opt_run.results)
+            "best_result": (
+                {
+                    "params": best.params,
+                    "metrics": best.metrics,
+                    "rank": best.rank,
+                }
+                if best
+                else None
+            ),
+            "total_runs": len(opt_run.results),
         }
 
         # Measure size of S3 artifacts
         import msgpack
+
         artifact_size = len(msgpack.packb(report_payload, use_bin_type=True))
 
-        metadata_key = f"research/{strategy_id}/optimization/{run_id}/metadata.msgpack.zstd"
+        metadata_key = (
+            f"research/{strategy_id}/optimization/{run_id}/metadata.msgpack.zstd"
+        )
         report_key = f"research/{strategy_id}/optimization/{run_id}/report.msgpack.zstd"
 
         await storage_service.upload_payload(metadata_key, meta_payload)
@@ -198,8 +234,15 @@ async def _execute_optimization_internal(
                     session.add(latest)
                 latest.latest_optimization_id = run_id
 
-        logger.info(f"Optimization run {run_id} completed with {len(opt_run.results)} results.")
-        return {"success": True, "run_id": run_id, "total_results": len(opt_run.results)}
+        logger.info(
+            f"Optimization run {run_id} completed with {len(opt_run.results)} results."
+        )
+        return {
+            "success": True,
+            "run_id": run_id,
+            "total_results": len(opt_run.results),
+        }
+
 
 @celery_app.task(name="app.modules.strategy_service.tasks.run_optimization_task")
 def run_optimization_task(
@@ -218,17 +261,18 @@ def run_optimization_task(
     """Celery background task for parameter optimization using grid or random search."""
     start_date = datetime.fromisoformat(start_date_iso)
     end_date = datetime.fromisoformat(end_date_iso)
-    return asyncio.run(_execute_optimization_internal(
-        run_id=run_id,
-        strategy_id=strategy_id,
-        start_date=start_date,
-        end_date=end_date,
-        initial_capital=initial_capital,
-        parameter_space_json=parameter_space_json,
-        constraints_json=constraints_json,
-        objective=objective,
-        search_type=search_type,
-        max_runs=max_runs,
-        strategy_version_id=strategy_version_id,
-    ))
-
+    return asyncio.run(
+        _execute_optimization_internal(
+            run_id=run_id,
+            strategy_id=strategy_id,
+            start_date=start_date,
+            end_date=end_date,
+            initial_capital=initial_capital,
+            parameter_space_json=parameter_space_json,
+            constraints_json=constraints_json,
+            objective=objective,
+            search_type=search_type,
+            max_runs=max_runs,
+            strategy_version_id=strategy_version_id,
+        )
+    )
