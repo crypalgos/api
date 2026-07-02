@@ -61,11 +61,13 @@ from app.modules.strategy_service.routes.endpoints.version_endpoints import (
 )
 from app.modules.strategy_service.routes.endpoints.job_endpoints import job_router
 from app.modules.strategy_service.routes.endpoints.data_endpoints import data_router
+from app.modules.strategy_service.routes.endpoints.live_endpoints import live_router
 
 strategy_router.include_router(core_router)
 strategy_router.include_router(version_router)
 strategy_router.include_router(job_router)
 strategy_router.include_router(data_router)
+strategy_router.include_router(live_router)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -2,7 +2,7 @@ import logging
 import asyncio
 from typing import Any
 from crypalgos_core.engine.context import ExecutionMode
-from app.modules.notification_service.telegram_adapter import telegram_adapter
+from app.modules.notification_service.utils.telegram_adapter import telegram_adapter
 
 logger = logging.getLogger(__name__)
 

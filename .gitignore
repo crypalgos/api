@@ -160,3 +160,4 @@ logs/
 alembic/versions/__pycache__/
 .env.prod
 .env.dev
+.commandcode

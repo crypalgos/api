@@ -15,6 +15,9 @@ if TYPE_CHECKING:
     from app.modules.strategy_service.models.strategy_version_model import (
         StrategyVersion,
     )
+    from app.modules.strategy_service.models.live_trading_session_model import (
+        LiveTradingSession,
+    )
 
 
 class Strategy(Base):
@@ -89,6 +92,11 @@ class Strategy(Base):
         back_populates="strategy",
         cascade="all, delete-orphan",
         foreign_keys="[StrategyVersion.strategy_id]",
+    )
+    live_sessions: Mapped[List["LiveTradingSession"]] = relationship(
+        "LiveTradingSession",
+        back_populates="strategy",
+        cascade="all, delete-orphan",
     )
 
     @property

@@ -8,8 +8,8 @@ logger = logging.getLogger(__name__)
 
 class TelegramAdapter:
     def __init__(self, bot_token: Optional[str] = None, chat_id: Optional[str] = None):
-        self.bot_token = bot_token or settings.get("TELEGRAM_BOT_TOKEN", "")
-        self.chat_id = chat_id or settings.get("TELEGRAM_CHAT_ID", "")
+        self.bot_token = bot_token or getattr(settings, "TELEGRAM_BOT_TOKEN", "")
+        self.chat_id = chat_id or getattr(settings, "TELEGRAM_CHAT_ID", "")
         self.base_url = f"https://api.telegram.org/bot{self.bot_token}"
 
     async def send_message(self, message: str, chat_id: Optional[str] = None) -> bool:

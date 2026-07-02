@@ -32,6 +32,7 @@ from app.modules.strategy_service.services.storage_service import storage_servic
 from app.modules.strategy_service.services.job_service import JobServiceMixin
 from app.modules.strategy_service.services.version_service import VersionServiceMixin
 from app.modules.strategy_service.services.data_service import DataServiceMixin
+from app.modules.strategy_service.services.live_service import LiveServiceMixin
 
 if not hasattr(DAGCompiler, "compile_dag"):
     DAGCompiler.compile_dag = staticmethod(compile_dag)
@@ -39,7 +40,9 @@ if not hasattr(DAGCompiler, "compile_dag"):
 logger = logging.getLogger(__name__)
 
 
-class StrategyService(JobServiceMixin, VersionServiceMixin, DataServiceMixin):
+class StrategyService(
+    JobServiceMixin, LiveServiceMixin, VersionServiceMixin, DataServiceMixin
+):
     def __init__(
         self,
         strategy_repository: StrategyRepository,

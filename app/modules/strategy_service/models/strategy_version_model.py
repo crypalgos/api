@@ -11,6 +11,9 @@ from app.config.base import Base
 if TYPE_CHECKING:
     from app.modules.strategy_service.models.research_run_model import ResearchRun
     from app.modules.strategy_service.models.strategy_model import Strategy
+    from app.modules.strategy_service.models.live_trading_session_model import (
+        LiveTradingSession,
+    )
 
 
 class StrategyVersion(Base):
@@ -56,4 +59,7 @@ class StrategyVersion(Base):
     )
     research_runs: Mapped[list["ResearchRun"]] = relationship(
         "ResearchRun", back_populates="strategy_version", cascade="all, delete-orphan"
+    )
+    live_sessions: Mapped[list["LiveTradingSession"]] = relationship(
+        "LiveTradingSession", back_populates="version"
     )
