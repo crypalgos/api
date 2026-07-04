@@ -15,6 +15,8 @@ from app.modules.strategy_service.services.storage_service import storage_servic
 from app.modules.strategy_service.tasks.sandbox import run_in_sandbox
 from app.modules.strategy_service.tasks.task_utils import (
     AsyncProgressFlusher,
+    compute_run_hash,
+    extract_run_params,
     job_lifecycle_context,
     load_and_compile_strategy,
 )
@@ -45,55 +47,29 @@ async def _execute_backtest_internal(
             else:
                 strategy = await session.get(Strategy, strategy_id)
 
-        # Extract parameters from strategy class datasources if present
-        symbols = []
-        dataset_ids = []
-        timeframe = "1m"
-        leverage = 1
-        exchange_name = "delta"
-        if hasattr(strat_class, "datasources") and isinstance(
-            strat_class.datasources, dict
-        ):
-            for ds_name, ds_info in strat_class.datasources.items():
-                if isinstance(ds_info, dict):
-                    sym = ds_info.get("symbol")
-                    if sym:
-                        symbols.append(sym)
-                    tf = ds_info.get("timeframe")
-                    if tf:
-                        timeframe = tf
-                    ds_id = ds_info.get("dataset_id")
-                    if ds_id:
-                        dataset_ids.append(ds_id)
-                    lev = ds_info.get("leverage")
-                    if lev is not None:
-                        leverage = lev
-                    exc = ds_info.get("exchange") or ds_info.get("broker")
-                    if exc:
-                        exchange_name = exc
+        # Execution inputs come from the strategy graph — never defaulted
+        run_params = extract_run_params(strat_class)
+        symbols = run_params.symbols
+        leverage = run_params.leverage
+        exchange_name = run_params.exchange_name
+
+        from crypalgos_data.exchanges.config import EXCHANGE_REGISTRY
+
+        exchange_cls = EXCHANGE_REGISTRY[exchange_name]
 
         commission = 0.0002  # Default maker fee
         slippage = 0.0002
 
-        # Compute comprehensive run hash
-        import hashlib
-        import json
-
-        hash_payload = {
-            "strategy_version_id": strategy_version_id,
-            "dataset_ids": sorted(dataset_ids),
-            "symbols": sorted(symbols),
-            "timeframe": timeframe,
-            "start_date": start_date.isoformat(),
-            "end_date": end_date.isoformat(),
-            "initial_capital": initial_capital,
-            "commission": commission,
-            "slippage": slippage,
-            "leverage": leverage,
-            "exchange": exchange_name,
-        }
-        hash_str = json.dumps(hash_payload, sort_keys=True, separators=(",", ":"))
-        run_hash = hashlib.sha256(hash_str.encode("utf-8")).hexdigest()
+        run_hash = compute_run_hash(
+            strategy_version_id=strategy_version_id,
+            compiled_code=getattr(strategy, "compiled_code", None),
+            params=run_params,
+            start_date=start_date,
+            end_date=end_date,
+            initial_capital=initial_capital,
+            commission=commission,
+            slippage=slippage,
+        )
 
         USE_SANDBOX = settings.sandbox_enabled
 
@@ -114,6 +90,7 @@ async def _execute_backtest_internal(
                     end_date=end_date,
                     initial_capital=initial_capital,
                     leverage=leverage,
+                    exchange_config=exchange_cls(),
                     slippage_rate=slippage,
                     progress_callback=flusher.update,
                 )
@@ -141,9 +118,12 @@ async def _execute_backtest_internal(
             report = await asyncio.to_thread(  # type: ignore
                 run_in_sandbox,
                 strategy=strategy,
+                exchange=exchange_name,
+                symbol=symbols[0] if symbols else "BTCUSD",
                 start_date=start_date,
                 end_date=end_date,
                 initial_capital=initial_capital,
+                leverage=leverage,
             )
 
         from dataclasses import asdict
@@ -267,7 +247,8 @@ async def _execute_backtest_internal(
             initial_capital=initial_capital,
             is_multi=is_multi,
             output_dir="",  # In MemoryStorage, this acts as the root
-            archive_workspace=True
+            archive_workspace=True,
+            symbols_list=symbols or None
         )
 
         manifest = workspace_result.get("manifest", {})
@@ -342,11 +323,11 @@ async def _execute_backtest_internal(
             average_trade = net_profit / total_trades if total_trades > 0 else 0.0
 
         if isinstance(symbols, dict):
-            symbol_str = ", ".join(symbols.keys()) if symbols else "BTCUSD"
+            symbol_str = ", ".join(symbols.keys())
         elif isinstance(symbols, list):
-            symbol_str = ", ".join(symbols) if symbols else "BTCUSD"
+            symbol_str = ", ".join(symbols)
         else:
-            symbol_str = str(symbols) if symbols else "BTCUSD"
+            symbol_str = str(symbols) if symbols else ""
 
         # Extract and downsample equity curve for preview
         global_ref = run_dict.get("report", {}).get("equity_curve")
@@ -377,7 +358,7 @@ async def _execute_backtest_internal(
             "win_rate": g_metrics.get("win_rate", 0.0),
             "expectancy": expectancy,
             "average_trade": average_trade,
-            "exchange": "delta",
+            "exchange": exchange_name,
             "symbol": symbol_str,
             "start_date": start_date.isoformat(),
             "end_date": end_date.isoformat(),

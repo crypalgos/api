@@ -1,5 +1,5 @@
 import logging
-from app.exceptions.exceptions import ResourceNotFoundException
+from app.exceptions.exceptions import ResourceNotFoundException, ValidationException
 from app.modules.replay.utils.workspace_reader import WorkspaceReader
 from app.modules.replay.utils.arrow_reader import ArrowReader
 from app.modules.strategy_service.repositories.strategy_repository import (
@@ -44,13 +44,18 @@ class ReplayService:
 
     async def get_manifest(self, user_id: str, run_id: str) -> tuple[int, dict]:
         """Fetch general manifest info for windowed replay."""
+        workspace_key = await self._resolve_workspace_key(user_id, run_id)
+        reader = WorkspaceReader(workspace_key)
         try:
-            workspace_key = await self._resolve_workspace_key(user_id, run_id)
-            reader = WorkspaceReader(workspace_key)
             candles_bytes = await reader.get_dataset_bytes("candles")
+        except ResourceNotFoundException:
+            # A workspace without candles has nothing to replay
+            raise ResourceNotFoundException("Workspace has no candles dataset.")
+        try:
             bar_count = ArrowReader.count_rows(candles_bytes)
-        except Exception:
-            bar_count = 0
+        except Exception as e:
+            logger.error(f"Corrupt candles dataset for run {run_id}: {e}")
+            raise ValidationException("Workspace artifact is corrupt: unreadable candles dataset.")
 
         return 200, {
             "workspace_version": 1,
@@ -68,14 +73,14 @@ class ReplayService:
         self, user_id: str, run_id: str, dataset_name: str, start_bar: int, end_bar: int
     ) -> tuple[int, list]:
         """Fetch windowed slice of a dataset for replay using start/end indices."""
+        # Missing run/strategy/workspace/dataset propagates as 404; a dataset that
+        # exists but cannot be decoded is a corrupt artifact, not a missing one.
+        workspace_key = await self._resolve_workspace_key(user_id, run_id)
+        reader = WorkspaceReader(workspace_key)
+        buf = await reader.get_dataset_bytes(dataset_name)
         try:
-            workspace_key = await self._resolve_workspace_key(user_id, run_id)
-            reader = WorkspaceReader(workspace_key)
-            buf = await reader.get_dataset_bytes(dataset_name)
             rows = ArrowReader.read_window(buf, start_bar, end_bar, dataset_name)
-            return 200, rows
-        except ResourceNotFoundException:
-            return 200, []
         except Exception as e:
-            logger.error(f"Failed to fetch window for {dataset_name}: {e}")
-            raise ResourceNotFoundException(f"Dataset {dataset_name} failed to load.")
+            logger.error(f"Corrupt dataset {dataset_name} for run {run_id}: {e}")
+            raise ValidationException(f"Workspace artifact is corrupt: dataset '{dataset_name}' failed to decode.")
+        return 200, rows

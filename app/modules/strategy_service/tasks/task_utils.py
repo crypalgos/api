@@ -1,9 +1,12 @@
 import asyncio
+import hashlib
 import importlib.util
+import json
 import logging
 from contextlib import asynccontextmanager
+from dataclasses import dataclass, field
 from datetime import datetime
-from typing import AsyncGenerator
+from typing import Any, AsyncGenerator
 
 from crypalgos_core.engine.strategy_base import StrategyBase
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,6 +16,102 @@ from app.modules.strategy_service.models.strategy_model import Strategy
 from app.modules.strategy_service.tasks.ast_validator import validate_strategy_ast
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class StrategyRunParams:
+    """Execution inputs resolved from the strategy graph — never defaulted."""
+
+    symbols: list[str] = field(default_factory=list)
+    dataset_ids: list[str] = field(default_factory=list)
+    timeframe: str = "1m"
+    leverage: int = 1
+    exchange_name: str = ""
+
+
+def extract_run_params(strat_class: type) -> StrategyRunParams:
+    """
+    Resolve symbols/timeframe/leverage/exchange from the strategy's datasources,
+    falling back to the compiled class 'exchange' attribute. A missing or unknown
+    exchange is an error — the graph is the single source of truth.
+    """
+    symbols: list[str] = []
+    dataset_ids: list[str] = []
+    timeframe = "1m"
+    leverage = 1
+    exchange_name = None
+
+    datasources = getattr(strat_class, "datasources", None)
+    if isinstance(datasources, dict):
+        for ds_info in datasources.values():
+            if not isinstance(ds_info, dict):
+                continue
+            if ds_info.get("symbol"):
+                symbols.append(ds_info["symbol"])
+            if ds_info.get("timeframe"):
+                timeframe = ds_info["timeframe"]
+            if ds_info.get("dataset_id"):
+                dataset_ids.append(ds_info["dataset_id"])
+            if ds_info.get("leverage") is not None:
+                leverage = ds_info["leverage"]
+            exc = ds_info.get("exchange") or ds_info.get("broker")
+            if exc:
+                exchange_name = exc
+
+    if not exchange_name:
+        exchange_name = getattr(strat_class, "exchange", None)
+    if not exchange_name:
+        raise ValueError(
+            f"Strategy '{getattr(strat_class, '__name__', strat_class)}' declares no "
+            "exchange in its datasources or class."
+        )
+    exchange_name = str(exchange_name).lower()
+
+    from crypalgos_data.exchanges.config import EXCHANGE_REGISTRY
+
+    if exchange_name not in EXCHANGE_REGISTRY:
+        raise ValueError(
+            f"Unknown exchange '{exchange_name}'. Available: {sorted(EXCHANGE_REGISTRY)}"
+        )
+
+    return StrategyRunParams(
+        symbols=symbols,
+        dataset_ids=dataset_ids,
+        timeframe=timeframe,
+        leverage=leverage,
+        exchange_name=exchange_name,
+    )
+
+
+def compute_run_hash(
+    *,
+    strategy_version_id: str | None,
+    compiled_code: str | None,
+    params: StrategyRunParams,
+    start_date: datetime,
+    end_date: datetime,
+    initial_capital: float,
+    commission: float,
+    slippage: float,
+) -> str:
+    """Deterministic identity of a run. Includes the code hash so unversioned
+    strategy edits never collide."""
+    hash_payload: dict[str, Any] = {
+        "strategy_version_id": strategy_version_id,
+        "code_sha256": hashlib.sha256((compiled_code or "").encode("utf-8")).hexdigest(),
+        "dataset_ids": sorted(params.dataset_ids),
+        "symbols": sorted(params.symbols),
+        "timeframe": params.timeframe,
+        "start_date": start_date.isoformat(),
+        "end_date": end_date.isoformat(),
+        "initial_capital": initial_capital,
+        "commission": commission,
+        "slippage": slippage,
+        "leverage": params.leverage,
+        "exchange": params.exchange_name,
+    }
+    hash_str = json.dumps(hash_payload, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(hash_str.encode("utf-8")).hexdigest()
 
 
 async def load_and_compile_strategy(

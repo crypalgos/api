@@ -158,7 +158,7 @@ def run_in_sandbox(
 
         # Write pre-fetched market data
         with open(os.path.join(sandbox_dir, "market_data.json"), "w") as f:
-            json.dump(market_data, f)
+            json.dump(market_data, f, default=str)
 
         # Write wrapper execution runner
         sandbox_runner_code = """import sys
@@ -227,6 +227,11 @@ def run():
 
     # ─── EXECUTE STRATEGY VIA CORE PIPELINE ───
     from crypalgos_core import execute_strategy, ExecutionConfig
+    from crypalgos_data.exchanges.config import EXCHANGE_REGISTRY
+
+    exchange_cls = EXCHANGE_REGISTRY.get(exchange)
+    if exchange_cls is None:
+        raise ValueError(f"Unknown exchange '{exchange}'. Available: {sorted(EXCHANGE_REGISTRY)}")
 
     config = ExecutionConfig(
         strategy_class=strat_class,
@@ -234,6 +239,7 @@ def run():
         end_date=end_date,
         initial_capital=initial_capital,
         leverage=leverage,
+        exchange_config=exchange_cls(),
         slippage_rate=0.0002,
     )
     bundle = execute_strategy(config)
@@ -254,7 +260,7 @@ def run():
     }
 
     with open("/sandbox/result.json", "w") as f:
-        json.dump(report, f)
+        json.dump(report, f, default=str)
 
 if __name__ == "__main__":
     try:
