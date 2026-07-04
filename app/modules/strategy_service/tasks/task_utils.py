@@ -195,7 +195,7 @@ def to_table(data_list):
                 rows.append(
                     {
                         "key": k,
-                        "value": (json.dumps(v) if isinstance(v, (dict, list)) else v),
+                        "value": (json.dumps(v, default=str) if isinstance(v, (dict, list)) else v),
                     }
                 )
 
@@ -210,16 +210,9 @@ def to_table(data_list):
         return pa.Table.from_pydict(arrays)
 
     if isinstance(data_list[0], dict):
-        # Ensure all dicts have same keys
-        keys = data_list[0].keys()
-        arrays = {k: [] for k in keys}
-        for row in data_list:
-            for k in keys:
-                val = row.get(k)
-                if isinstance(val, (dict, list)):
-                    val = json.dumps(val)
-                arrays[k].append(val)
-        return pa.Table.from_pydict(arrays)
+        # Store heterogeneous dicts as JSON payload column to avoid Arrow schema conflicts
+        payloads = [json.dumps(row, default=str) for row in data_list]
+        return pa.Table.from_arrays([pa.array(payloads)], names=["payload"])
     elif isinstance(data_list[0], list):
         # Matrix (e.g. timestamps + values)
         num_cols = len(data_list[0])
@@ -255,3 +248,5 @@ def extract_dataset_ids(data, ids):
     elif isinstance(data, list):
         for item in data:
             extract_dataset_ids(item, ids)
+
+

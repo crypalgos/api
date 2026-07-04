@@ -46,7 +46,27 @@ async def _execute_montecarlo_internal(
             backtest_payload = await storage_service.download_payload(
                 backtest_report_key
             )
-            backtest_report = backtest_payload.get("charting", {})
+
+            trades = []
+            workspace_key = backtest_run.artifact_manifest.get("workspace") if backtest_run.artifact_manifest else None
+            if workspace_key:
+                try:
+                    import io
+                    import pyarrow as pa
+                    from app.modules.replay.utils.workspace_reader import WorkspaceReader
+                    reader = WorkspaceReader(workspace_key)
+                    trades_bytes = await reader.get_dataset_bytes("trades")
+                    with pa.ipc.open_file(io.BytesIO(trades_bytes)) as reader_arrow:
+                        table = reader_arrow.read_all()
+                    trades = table.to_pylist()
+                except Exception as e:
+                    logger.error(f"Failed to read trades from workspace: {e}")
+
+            if not trades:
+                backtest_report = backtest_payload.get("charting")
+                if backtest_report is None:
+                    backtest_report = backtest_payload
+                trades = backtest_report.get("trades", {}).get("recent_trades", [])
 
         mc_method = MonteCarloMethod(method)
         job = MonteCarloJob(
@@ -74,7 +94,6 @@ async def _execute_montecarlo_internal(
             def __init__(self, trades):
                 self.trades = trades
 
-        trades = backtest_report.get("trades", {}).get("recent_trades", [])
         if not trades:
             raise ValueError("Source backtest has no valid trades to run Monte Carlo.")
 

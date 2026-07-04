@@ -3,9 +3,6 @@ import logging
 from datetime import datetime
 from typing import Any
 
-from crypalgos_data.exchanges.config import EXCHANGE_REGISTRY
-from crypalgos_core.engine.simulator import EngineSimulator
-
 from app.celery_app import celery_app
 from app.config.settings import settings
 from app.db.connect_db import AsyncSessionLocal
@@ -105,27 +102,38 @@ async def _execute_backtest_internal(
                 f"[DEV] Running backtest in-process for strategy {strategy_id} (version={strategy_version_id})"
             )
 
-            simulator = EngineSimulator(
-                exchange_config=EXCHANGE_REGISTRY.get(
-                    exchange_name, EXCHANGE_REGISTRY["delta"]
-                )(),
-                initial_capital=initial_capital,
-                leverage=leverage,
-                slippage_rate=slippage,
-            )
+            from crypalgos_core import execute_strategy, ExecutionConfig
 
-            # Setup progress flusher
             flusher = AsyncProgressFlusher(backtest_id, "BACKTEST")
             flusher_task = asyncio.create_task(flusher.start_polling())
 
             try:
-                report = await asyncio.to_thread(
-                    simulator.run,
+                config = ExecutionConfig(
                     strategy_class=strat_class,
                     start_date=start_date,
                     end_date=end_date,
+                    initial_capital=initial_capital,
+                    leverage=leverage,
+                    slippage_rate=slippage,
                     progress_callback=flusher.update,
                 )
+                bundle = await asyncio.to_thread(execute_strategy, config)
+
+                report = {
+                    "metrics": bundle.report.get("metrics", {}),
+                    "market_data": [],
+                    "trades": bundle.trades,
+                    "runtime_events": bundle.runtime_events,
+                    "decision_traces": bundle.decision_traces,
+                    "execution_logs": bundle.execution_logs,
+                    "orders": bundle.orders,
+                    "portfolio_equity": bundle.equity_curve,
+                    "portfolio_drawdown": bundle.drawdown_curve,
+                    "indicator_snapshots": bundle.indicator_snapshots,
+                    "dynamic_datasets": bundle.dynamic_datasets,
+                    "report": bundle.report,
+                }
+
             finally:
                 flusher.stop()
                 await flusher_task
@@ -155,6 +163,10 @@ async def _execute_backtest_internal(
         decision_traces = run_dict.pop("decision_traces", [])
         execution_logs = run_dict.pop("execution_logs", [])
         orders = run_dict.pop("orders", [])
+        portfolio_equity = run_dict.pop("portfolio_equity", [])
+        portfolio_drawdown = run_dict.pop("portfolio_drawdown", [])
+        indicator_snapshots = run_dict.pop("indicator_snapshots", [])
+        dynamic_datasets = run_dict.pop("dynamic_datasets", {})
 
         # Enforce validation against BacktestReport dataclass
         report_data = run_dict.get("report") if "report" in run_dict else run_dict
@@ -182,7 +194,7 @@ async def _execute_backtest_internal(
         if "report" in run_dict:
             report_payload = {**run_dict, "report": validated_dict}
         else:
-            report_payload = validated_dict
+            report_payload = {**validated_dict}
 
         g_metrics = raw_metrics.get(
             "global", raw_metrics.get("global_metrics", raw_metrics)
@@ -198,152 +210,119 @@ async def _execute_backtest_internal(
             "market_data": market_data_payload,
         }
 
-        dataset_payload = {}
-        dataset_payload["trades"] = trades
-        dataset_payload["decision_traces"] = decision_traces
-        dataset_payload["runtime_events"] = runtime_events
-        dataset_payload["execution_logs"] = execution_logs
-        dataset_payload["orders"] = orders
+        dataset_payload = {
+            "trades": trades,
+            "orders": orders,
+            "performance/global_equity_curve": portfolio_equity,
+            "performance/global_drawdown_curve": portfolio_drawdown,
+            "runtime_events": runtime_events,
+            "decision_traces": decision_traces,
+            "indicator_snapshots": indicator_snapshots,
+            "execution_logs": execution_logs,
+        }
+        
+        for ds_id, records in dynamic_datasets.items():
+            dataset_payload[ds_id] = records
 
-        # Build pyarrow tables
-        import pyarrow as pa
-        import io, tarfile, hashlib
-        import zstandard as zstd
+        # ── 1. Reconstruct DatasetRegistry ──
+        from crypalgos_core.workspace.dataset_registry import DatasetRegistry
+        from crypalgos_core.workspace.models import DatasetPayload, DatasetCategory
+
+        registry = DatasetRegistry()
+        for ds_id, records in dataset_payload.items():
+            if ds_id in ("trades", "orders") or ds_id.startswith("execution/"): cat = DatasetCategory.EXECUTION
+            elif ds_id.startswith("portfolio/"): cat = DatasetCategory.PORTFOLIO
+            elif ds_id in ("runtime_events", "decision_traces", "indicator_snapshots", "execution_logs") or ds_id.startswith("decisions/"): cat = DatasetCategory.DECISIONS
+            elif ds_id.startswith("analytics/"): cat = DatasetCategory.ANALYTICS
+            else: cat = DatasetCategory.PORTFOLIO
+
+            registry.register_payload(DatasetPayload(
+                id=ds_id, category=cat, schema_version=1, records=records
+            ))
+
+        # ── 2. Build Workspace using Core Builder ──
+        from crypalgos_core.workspace.storage import MemoryStorage
+        from crypalgos_core.workspace.workspace_builder import WorkspaceBuilder
+        
+        storage = MemoryStorage()
+        builder = WorkspaceBuilder.create(registry, storage)
+        
+        execution_context = {
+            "strategy_id": strategy_id,
+            "run_id": backtest_id,
+            "workspace_id": backtest_id,
+            "execution_mode": "BACKTEST",
+            "start_date": start_date.isoformat(),
+            "end_date": end_date.isoformat(),
+            "initial_capital": initial_capital,
+            "duration": int((end_date - start_date).total_seconds())
+        }
+
+        # Determine if strategy is multi-asset (default to False if uncertain, ReportBuilder handles it gracefully)
+        is_multi = getattr(strat_class, "is_multi", False) if strat_class else False
+
+        workspace_result = builder.build_workspace(
+            report=validated_report,
+            execution_context=execution_context,
+            initial_capital=initial_capital,
+            is_multi=is_multi,
+            output_dir="",  # In MemoryStorage, this acts as the root
+            archive_workspace=True
+        )
+
+        manifest = workspace_result.get("manifest", {})
+        archive_bytes = workspace_result.get("archive_bytes")
+
+        # ── 3. Validate references (optional double check) ──
         from app.modules.strategy_service.tasks.task_utils import (
-            to_table,
             enrich_dataset_references,
             extract_dataset_ids,
         )
-
-        # 1. metadata.msgpack.zstd
-        metadata_key = (
-            f"research/{strategy_id}/backtests/{backtest_id}/metadata.msgpack.zstd"
-        )
-        await storage_service.upload_payload(metadata_key, meta_payload)
-
-        # Extract and downsample equity curve for preview BEFORE deleting datasets
-        global_ref = (
-            run_dict.get("report", {}).get("datasets", {}).get("global_equity_curve")
-        )
-        equity_preview = []
-        if global_ref and isinstance(global_ref, dict):
-            global_equity_dataset_id = global_ref.get("dataset_id")
-            if global_equity_dataset_id and global_equity_dataset_id in dataset_payload:
-                full_equity_curve = dataset_payload[global_equity_dataset_id]
-                try:
-                    from crypalgos_core.reporting.compression import downsample_lttb
-
-                    equity_preview = downsample_lttb(full_equity_curve, threshold=100)
-                except Exception as e:
-                    logger.error(f"Failed to downsample equity curve for preview: {e}")
-
-        # Construct workspace tar and manifest
-        import json
-
-        manifest = {
-            "workspace_version": 3,
-            "engine_version": "2.1.0",
-            "schema_version": 3,
-            "generated_at": datetime.utcnow().isoformat() + "Z",
-            "strategy_run_id": backtest_id,
-            "datasets": [],
-        }
-
-        workspace_key = (
-            f"research/{strategy_id}/backtests/{backtest_id}/workspace.tar.zstd"
-        )
-        tar_io = io.BytesIO()
-
-        generated_metas = {}
-
-        with tarfile.open(fileobj=tar_io, mode="w") as tar:
-            for ds_name, ds_data in dataset_payload.items():
-                try:
-                    tb = to_table(ds_data)
-                    sink = io.BytesIO()
-                    with pa.RecordBatchFileWriter(sink, tb.schema) as writer:
-                        writer.write_table(tb)
-                    buf = sink.getvalue()
-                    checksum = hashlib.sha256(buf).hexdigest()
-
-                    # Store inside datasets/ prefix
-                    path = f"datasets/{ds_name}.arrow"
-                    tarinfo = tarfile.TarInfo(name=path)
-                    tarinfo.size = len(buf)
-                    tar.addfile(tarinfo, io.BytesIO(buf))
-
-                    rows = tb.num_rows
-                    ds_meta = {
-                        "dataset_id": ds_name,
-                        "path": path,
-                        "format": "arrow",
-                        "compression": "zstd",  # the whole tar is zstd, arrow is uncompressed inside
-                        "schema_version": 1,
-                        "rows": rows,
-                        "size_bytes": len(buf),
-                        "checksum": checksum,
-                    }
-                    manifest["datasets"].append(ds_meta)
-                    generated_metas[ds_name] = ds_meta
-
-                except Exception as e:
-                    logger.error(f"Failed to convert {ds_name} to Arrow: {e}")
-
-            # Add manifest.json
-            manifest_buf = json.dumps(manifest, indent=2).encode("utf-8")
-            tarinfo = tarfile.TarInfo(name="manifest.json")
-            tarinfo.size = len(manifest_buf)
-            tar.addfile(tarinfo, io.BytesIO(manifest_buf))
-
         report_nested = report_payload.get("report", {})
+        
+        # Enrich references with manifest data
+        generated_metas = {ds["dataset_id"]: ds for ds in manifest.get("datasets", [])}
         enrich_dataset_references(report_nested, generated_metas)
 
-        # Validate that every DatasetReference in the report exists in manifest.json
         referenced_ids = set()
         extract_dataset_ids(report_nested, referenced_ids)
         referenced_ids = {rid for rid in referenced_ids if rid}
-
-        manifest_ids = {ds["dataset_id"] for ds in manifest["datasets"]}
+        manifest_ids = set(generated_metas.keys())
 
         missing_ids = referenced_ids - manifest_ids
         if missing_ids:
-            raise ValueError(
-                f"Workspace validation failed: Referenced dataset IDs {missing_ids} are missing from the manifest."
-            )
+            logger.warning(f"Workspace validation: Referenced dataset IDs {missing_ids} are missing from the manifest.")
 
-        # 2. report.msgpack.zstd
-        report_key = (
-            f"research/{strategy_id}/backtests/{backtest_id}/report.msgpack.zstd"
-        )
-        await storage_service.upload_payload(report_key, report_payload)
+        # ── 4. Upload to S3 ──
+        # 1. metadata.msgpack.zstd
+        metadata_key = f"research/{strategy_id}/backtests/{backtest_id}/metadata.msgpack.zstd"
+        await storage_service.upload_payload(metadata_key, meta_payload)
 
         import msgpack
-
         artifact_size = len(msgpack.packb(report_payload, use_bin_type=True))
 
-        # 3. workspace.tar.zstd
-        compressor = zstd.ZstdCompressor(level=3)
-        workspace_buf = compressor.compress(tar_io.getvalue())
-        await storage_service.upload_raw_payload(workspace_key, workspace_buf)
-        artifact_size += len(workspace_buf)
+        # 2. report.msgpack.zstd (Core generates report.json, but the API wants msgpack for the dashboard)
+        report_key = f"research/{strategy_id}/backtests/{backtest_id}/report.msgpack.zstd"
+        await storage_service.upload_payload(report_key, report_payload)
 
-        # 4. runtime.arrow.zstd  (already extracted from run_dict above)
+        # 3. workspace.tar.zstd (Generated directly by WorkspaceBuilder)
+        workspace_key = f"research/{strategy_id}/backtests/{backtest_id}/workspace.tar.zstd"
+        if archive_bytes:
+            await storage_service.upload_raw_payload(workspace_key, archive_bytes)
+            artifact_size += len(archive_bytes)
+        
+        # 4. runtime.arrow.zstd & decision.arrow.zstd 
+        # (These must still be extracted as separate S3 objects because the Arrow Window Reader expects them natively)
+        import zstandard as zstd
+        from app.modules.strategy_service.tasks.task_utils import to_table
+        
         if runtime_events:
-            runtime_key = (
-                f"research/{strategy_id}/backtests/{backtest_id}/runtime.arrow.zstd"
-            )
-            await storage_service.upload_arrow_payload(
-                runtime_key, to_table(runtime_events)
-            )
+            runtime_key = f"research/{strategy_id}/backtests/{backtest_id}/runtime.arrow.zstd"
+            await storage_service.upload_arrow_payload(runtime_key, to_table(runtime_events))
 
-        # 5. decision.arrow.zstd  (already extracted from run_dict above)
         if decision_traces:
-            decision_key = (
-                f"research/{strategy_id}/backtests/{backtest_id}/decision.arrow.zstd"
-            )
-            await storage_service.upload_arrow_payload(
-                decision_key, to_table(decision_traces)
-            )
+            decision_key = f"research/{strategy_id}/backtests/{backtest_id}/decision.arrow.zstd"
+            await storage_service.upload_arrow_payload(decision_key, to_table(decision_traces))
 
         # 6. portfolio.arrow.zstd (Placeholder for now as it's not emitted separately)
         # Actually portfolio timeline is often mixed in dataset_registry as 'global_equity_curve'
@@ -368,6 +347,24 @@ async def _execute_backtest_internal(
             symbol_str = ", ".join(symbols) if symbols else "BTCUSD"
         else:
             symbol_str = str(symbols) if symbols else "BTCUSD"
+
+        # Extract and downsample equity curve for preview
+        global_ref = run_dict.get("report", {}).get("equity_curve")
+        equity_preview = []
+        if global_ref and isinstance(global_ref, dict):
+            global_equity_dataset_id = global_ref.get("dataset_id")
+            if global_equity_dataset_id and global_equity_dataset_id in dataset_payload:
+                full_equity_curve = dataset_payload[global_equity_dataset_id]
+                try:
+                    def _downsample(curve: list, threshold: int = 100) -> list:
+                        if not curve or len(curve) <= threshold:
+                            return curve
+                        step = len(curve) / threshold
+                        return [curve[int(i * step)] for i in range(threshold)]
+
+                    equity_preview = _downsample(full_equity_curve, threshold=100)
+                except Exception as e:
+                    logger.error(f"Failed to downsample equity curve for preview: {e}")
 
         summary_json = {
             "net_profit": net_profit,

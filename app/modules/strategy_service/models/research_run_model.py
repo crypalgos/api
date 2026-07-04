@@ -87,6 +87,48 @@ class ResearchRun(Base):
         nullable=False,
     )
 
+    @property
+    def report_s3_key(self) -> Optional[str]:
+        if self.artifact_manifest:
+            return self.artifact_manifest.get("report")
+        return None
+
+    @report_s3_key.setter
+    def report_s3_key(self, value: Optional[str]) -> None:
+        if self.artifact_manifest is None:
+            self.artifact_manifest = {}
+        manifest = dict(self.artifact_manifest)
+        manifest["report"] = value
+        self.artifact_manifest = manifest
+
+    @property
+    def metadata_s3_key(self) -> Optional[str]:
+        if self.artifact_manifest:
+            return self.artifact_manifest.get("metadata")
+        return None
+
+    @metadata_s3_key.setter
+    def metadata_s3_key(self, value: Optional[str]) -> None:
+        if self.artifact_manifest is None:
+            self.artifact_manifest = {}
+        manifest = dict(self.artifact_manifest)
+        manifest["metadata"] = value
+        self.artifact_manifest = manifest
+
+    @property
+    def dataset_s3_key(self) -> Optional[str]:
+        if self.artifact_manifest:
+            return self.artifact_manifest.get("workspace")
+        return None
+
+    @dataset_s3_key.setter
+    def dataset_s3_key(self, value: Optional[str]) -> None:
+        if self.artifact_manifest is None:
+            self.artifact_manifest = {}
+        manifest = dict(self.artifact_manifest)
+        manifest["workspace"] = value
+        self.artifact_manifest = manifest
+
     # Relationships
     strategy: Mapped["Strategy"] = relationship(
         "Strategy", back_populates="research_runs"

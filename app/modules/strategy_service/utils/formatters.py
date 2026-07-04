@@ -26,11 +26,12 @@ def extract_workspace_dataset_rows(raw_zstd: bytes, dataset_name: str) -> list:
         except KeyError:
             raise ResourceNotFoundException("Workspace manifest.json not found")
 
-        # 2. Find dataset in manifest
+        # 2. Find dataset in manifest — try exact match first, then suffix match
         datasets_list = manifest.get("datasets", [])
         dataset_meta = None
         for ds in datasets_list:
-            if ds.get("dataset_id") == dataset_name:
+            dsid = ds.get("dataset_id", "")
+            if dsid == dataset_name or dsid.endswith("/" + dataset_name):
                 dataset_meta = ds
                 break
 
@@ -67,6 +68,14 @@ def extract_workspace_dataset_rows(raw_zstd: bytes, dataset_name: str) -> list:
                                 row[k] = json.loads(v)
                             except Exception:
                                 pass
+                    # Unwrap single "payload" key — handles both string and dict payloads
+                    if list(row.keys()) == ["payload"]:
+                        payload = row["payload"]
+                        if isinstance(payload, str):
+                            payload = json.loads(payload)
+                        if isinstance(payload, dict):
+                            row.clear()
+                            row.update(payload)
                 return rows
         except KeyError:
             raise ResourceNotFoundException(

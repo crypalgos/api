@@ -109,8 +109,8 @@ class OrderBookProjection:
 
     def apply_update(
         self,
-        bids_delta: List[List[Decimal]],
-        asks_delta: List[List[Decimal]],
+        bids_delta: List[List[str]],
+        asks_delta: List[List[str]],
         sequence: int,
         timestamp: int,
     ) -> bool:
@@ -137,14 +137,18 @@ class OrderBookProjection:
         old_top_ask = self.get_top_level(is_bid=False)
 
         # Apply bids
-        for price, size in bids_delta:
+        for price_raw, size_raw in bids_delta:
+            price = Decimal(str(price_raw))
+            size = Decimal(str(size_raw))
             if size == Decimal("0"):
                 self.bids.pop(price, None)
             else:
                 self.bids[price] = size
 
         # Apply asks
-        for price, size in asks_delta:
+        for price_raw, size_raw in asks_delta:
+            price = Decimal(str(price_raw))
+            size = Decimal(str(size_raw))
             if size == Decimal("0"):
                 self.asks.pop(price, None)
             else:

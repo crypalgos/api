@@ -75,11 +75,11 @@ class DeltaExchangeClient(BaseExchangeClient):
                     "sequence": int(message.get("sequence_number", 0)),
                     "timestamp": int(message.get("timestamp", 0)),
                     "bids": [
-                        [Decimal(str(item[0])), Decimal(str(item[1]))]
+                        [str(item[0]), str(item[1])]
                         for item in message.get("bids", [])
                     ],
                     "asks": [
-                        [Decimal(str(item[0])), Decimal(str(item[1]))]
+                        [str(item[0]), str(item[1])]
                         for item in message.get("asks", [])
                     ],
                 },

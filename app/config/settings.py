@@ -2,6 +2,7 @@ import os
 from typing import Final
 
 from dotenv import load_dotenv
+from pydantic import Field, AliasChoices
 from pydantic_settings import BaseSettings
 
 
@@ -62,8 +63,9 @@ class Settings(BaseSettings):
     sandbox_enabled: bool = (
         False  # Set SANDBOX_ENABLED=true in .env.prod for Docker gVisor path
     )
-    encryption_key: str = (
-        "T3N0Z3J4VzVzOGM5ZDEyMzQ1Njc4OWFiY2RlZmdoaWprbG1ub3BxcnN0dXY="  # default 32-byte urlsafe base64 key
+    encryption_key: str = Field(
+        default="dGhpc19pc19hX2RlZmF1bHRfa2V5XzMyYnl0ZXNfISE=",  # default 32-byte urlsafe base64 key
+        validation_alias=AliasChoices("encryption_key", "credential_encryption_key")
     )
     s3_bucket_name: str = ""
     aws_access_key_id: str = ""

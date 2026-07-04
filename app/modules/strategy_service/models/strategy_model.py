@@ -106,3 +106,5 @@ class Strategy(Base):
 
 # Import here to avoid circular imports during mapper initialization
 from app.modules.strategy_service.models.strategy_version_model import StrategyVersion
+from app.modules.strategy_service.models.live_trading_session_model import LiveTradingSession
+from app.modules.strategy_service.models.research_run_model import ResearchRun

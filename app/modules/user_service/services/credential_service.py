@@ -46,11 +46,21 @@ class CredentialService:
     def __init__(self):
         # Initialize Fernet cipher
         try:
-            key_bytes = settings.encryption_key.encode("utf-8")
+            key = settings.encryption_key
+            if not key:
+                raise ValueError("Encryption key is empty")
+            key_bytes = key.encode("utf-8")
             # Ensure it is valid base64 key
             self.cipher = Fernet(key_bytes)
         except Exception as e:
-            logger.error(f"Failed to initialize Fernet encryption cipher: {e}")
+            if settings.env == "development" or settings.debug:
+                logger.warning(
+                    f"Fernet encryption key not set or invalid ({e}). Using temporary random key."
+                )
+            else:
+                logger.error(
+                    f"Failed to initialize Fernet encryption cipher: {e}. Using temporary random key."
+                )
             # Fallback/fallback key generator for test resilience
             self.cipher = Fernet(Fernet.generate_key())
 

@@ -174,8 +174,6 @@ logging.getLogger("BacktestingEngine.Simulator").setLevel(logging.ERROR)
 
 sys.path.insert(0, "/app")
 
-from crypalgos_data.exchanges.config import EXCHANGE_REGISTRY
-from crypalgos_core.engine.simulator import EngineSimulator
 from crypalgos_core.engine.strategy_base import StrategyBase
 
 def run():
@@ -227,19 +225,33 @@ def run():
     if not strat_class:
         raise ValueError("No StrategyBase subclass resolved in strategy script.")
 
-    simulator = EngineSimulator(
-        exchange_config=EXCHANGE_REGISTRY.get(exchange.lower(), EXCHANGE_REGISTRY['delta'])(),
+    # ─── EXECUTE STRATEGY VIA CORE PIPELINE ───
+    from crypalgos_core import execute_strategy, ExecutionConfig
+
+    config = ExecutionConfig(
+        strategy_class=strat_class,
+        start_date=start_date,
+        end_date=end_date,
         initial_capital=initial_capital,
         leverage=leverage,
         slippage_rate=0.0002,
-        taker_fee_rate=0.0005
     )
+    bundle = execute_strategy(config)
 
-    report = simulator.run(
-        strategy_class=strat_class,
-        start_date=start_date,
-        end_date=end_date
-    )
+    report = {
+        "metrics": bundle.report.get("metrics", {}),
+        "market_data": [],
+        "trades": bundle.trades,
+        "runtime_events": bundle.runtime_events,
+        "decision_traces": bundle.decision_traces,
+        "execution_logs": bundle.execution_logs,
+        "orders": bundle.orders,
+        "portfolio_equity": bundle.equity_curve,
+        "portfolio_drawdown": bundle.drawdown_curve,
+        "indicator_snapshots": bundle.indicator_snapshots,
+        "dynamic_datasets": bundle.dynamic_datasets,
+        "report": bundle.report,
+    }
 
     with open("/sandbox/result.json", "w") as f:
         json.dump(report, f)

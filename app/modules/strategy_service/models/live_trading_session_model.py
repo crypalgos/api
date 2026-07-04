@@ -99,3 +99,8 @@ class LiveTradingSession(Base):
     version: Mapped[Optional["StrategyVersion"]] = relationship(
         "StrategyVersion", back_populates="live_sessions"
     )
+
+
+# Import here to avoid circular imports during mapper initialization
+from app.modules.strategy_service.models.strategy_model import Strategy
+from app.modules.strategy_service.models.strategy_version_model import StrategyVersion
