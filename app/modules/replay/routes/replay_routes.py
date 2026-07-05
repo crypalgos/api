@@ -28,8 +28,6 @@ def get_replay_service(
     return ReplayService(StrategyRepository(session), ResearchRunRepository(session))
 
 
-# ── Session bootstrap ───────────────────────────────────────────────────────
-
 @replay_router.get(
     "/research-runs/{run_id}/replay/session",
     dependencies=[Depends(security)],
@@ -44,8 +42,6 @@ async def get_replay_session(
     return BaseResponseHandler.success_response(data=result, status_code=200)
 
 
-# ── Windowed replay (pre-nested trees — frontend reconstructs nothing) ─────
-
 @replay_router.get(
     "/research-runs/{run_id}/replay/window",
     dependencies=[Depends(security)],
@@ -57,14 +53,12 @@ async def get_replay_window(
     to_candle: int = Query(100, ge=0),
     replay_service: ReplayService = Depends(get_replay_service),
 ) -> JSONResponse:
-    """One replay window: candles + nested event trees + traces + indicators."""
+    """One replay window: candles + pre-nested event trees + traces + indicators."""
     result = await replay_service.get_window(
         user["user_id"], run_id, from_candle, to_candle
     )
     return BaseResponseHandler.success_response(data=result, status_code=200)
 
-
-# ── Trade inspector ─────────────────────────────────────────────────────────
 
 @replay_router.get(
     "/research-runs/{run_id}/replay/trades/{trade_id}",
@@ -81,8 +75,6 @@ async def get_replay_trade(
     return BaseResponseHandler.success_response(data=result, status_code=200)
 
 
-# ── Single dataset (allowlisted; also serves the legacy per-dataset paths) ──
-
 @replay_router.get(
     "/research-runs/{run_id}/replay/datasets/{dataset_name}",
     dependencies=[Depends(security)],
@@ -95,56 +87,9 @@ async def get_replay_dataset(
     end_bar: int = Query(100, ge=0),
     replay_service: ReplayService = Depends(get_replay_service),
 ) -> JSONResponse:
-    """Windowed slice of a single allowlisted replay dataset."""
+    """Windowed slice of a single allowlisted replay dataset (lazy panels)."""
     status_code, result = await replay_service.get_dataset_window(
         user["user_id"], run_id, dataset_name,
         start_bar=start_bar, end_bar=end_bar,
     )
     return BaseResponseHandler.success_response(data=result, status_code=status_code)
-
-
-# ── Legacy aliases (deprecated — kept until the frontend migrates) ─────────
-
-@replay_router.get(
-    "/research-runs/{run_id}/replay/manifest",
-    dependencies=[Depends(security)],
-    deprecated=True,
-)
-async def get_replay_manifest(
-    run_id: str,
-    user: Annotated[dict, Depends(get_current_user)],
-    replay_service: ReplayService = Depends(get_replay_service),
-) -> JSONResponse:
-    """Deprecated: use /replay/session."""
-    status_code, result = await replay_service.get_manifest(user["user_id"], run_id)
-    return BaseResponseHandler.success_response(data=result, status_code=status_code)
-
-
-def _register_legacy_dataset_route(path_name: str, dataset_name: str) -> None:
-    @replay_router.get(
-        f"/research-runs/{{run_id}}/replay/{path_name}",
-        dependencies=[Depends(security)],
-        deprecated=True,
-        name=f"legacy_replay_{dataset_name}",
-    )
-    async def legacy_dataset(
-        run_id: str,
-        user: Annotated[dict, Depends(get_current_user)],
-        start_bar: int = Query(0, ge=0),
-        end_bar: int = Query(100, ge=0),
-        replay_service: ReplayService = Depends(get_replay_service),
-    ) -> JSONResponse:
-        status_code, result = await replay_service.get_dataset_window(
-            user["user_id"], run_id, dataset_name,
-            start_bar=start_bar, end_bar=end_bar,
-        )
-        return BaseResponseHandler.success_response(data=result, status_code=status_code)
-
-
-for _path, _dataset in (
-    ("candles", "candles"),
-    ("indicator-snapshots", "indicator_snapshots"),
-    ("runtime-events", "runtime_events"),
-    ("decision-traces", "decision_traces"),
-):
-    _register_legacy_dataset_route(_path, _dataset)

@@ -93,7 +93,6 @@ def _manifest(schema_version=2):
         "bar_count": len(CANDLES),
         "trade_count": len(TRADES),
         "indicator_count": len(INDICATORS),
-        "deprecated_fields": ["correlation_id"],
         "datasets": [
             {"dataset_id": name} for name in
             ("candles", "runtime_events", "decision_traces", "indicator_snapshots", "trades")
@@ -162,10 +161,12 @@ async def test_session_contents(service):
 
 
 @pytest.mark.asyncio
-async def test_session_rejects_newer_schema(service):
-    FakeWorkspaceReader.manifest = _manifest(schema_version=99)
-    with pytest.raises(ValidationException, match="newer than this API"):
-        await service.get_session("u1", "r1")
+async def test_session_rejects_wrong_schema(service):
+    """Engine v2: exactly one supported schema — both older and newer rejected."""
+    for bad_version in (1, 99):
+        FakeWorkspaceReader.manifest = _manifest(schema_version=bad_version)
+        with pytest.raises(ValidationException, match="not supported"):
+            await service.get_session("u1", "r1")
 
 
 # ── T-REPLAY-3/4: window ────────────────────────────────────────────────────
@@ -207,12 +208,15 @@ async def test_window_orphans_preserved_at_window_edge(service):
 
 
 @pytest.mark.asyncio
-async def test_window_events_carry_deprecated_projections(service):
+async def test_window_events_have_no_shim_fields(service):
+    """Engine v2: linkage is parent_sequence/root_sequence ints — nothing else."""
     window = await service.get_window("u1", "r1", 0, 0)
     cond = window["candle_trees"][0]["bar"]["children"][0]
-    assert cond["parent_event_id"] == "1"
-    assert cond["correlation_id"] == "1"
-    assert "id" not in cond or cond.get("id") is None
+    assert cond["parent_sequence"] == 1
+    assert cond["root_sequence"] == 1
+    assert "correlation_id" not in cond
+    assert "parent_event_id" not in cond
+    assert "id" not in cond
 
 
 @pytest.mark.asyncio
