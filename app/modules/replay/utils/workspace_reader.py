@@ -30,6 +30,19 @@ class WorkspaceReader:
         workspace_cache.set(self.workspace_key, decompressed)
         return decompressed
 
+    async def get_manifest(self) -> dict:
+        """Read and parse the workspace manifest.json."""
+        archive_bytes = await self._get_decompressed_archive()
+        tar_io = io.BytesIO(archive_bytes)
+        with tarfile.open(fileobj=tar_io, mode="r") as tar:
+            try:
+                manifest_file = tar.extractfile("manifest.json")
+                if not manifest_file:
+                    raise ResourceNotFoundException("Workspace manifest.json not found")
+                return json.loads(manifest_file.read().decode("utf-8"))
+            except KeyError:
+                raise ResourceNotFoundException("Workspace manifest.json not found")
+
     async def get_dataset_bytes(self, dataset_name: str) -> bytes:
         """Extract a single arrow file's raw bytes from the tar archive."""
         archive_bytes = await self._get_decompressed_archive()

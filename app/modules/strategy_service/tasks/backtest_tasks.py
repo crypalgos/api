@@ -292,18 +292,18 @@ async def _execute_backtest_internal(
             await storage_service.upload_raw_payload(workspace_key, archive_bytes)
             artifact_size += len(archive_bytes)
         
-        # 4. runtime.arrow.zstd & decision.arrow.zstd 
+        # 4. runtime.arrow.zstd & decision.arrow.zstd
         # (These must still be extracted as separate S3 objects because the Arrow Window Reader expects them natively)
-        import zstandard as zstd
-        from app.modules.strategy_service.tasks.task_utils import to_table
-        
+        # Typed envelope schema (artifact v2) — no first-row key inference
+        from crypalgos_core.events.arrow_schemas import events_to_arrow_table
+
         if runtime_events:
             runtime_key = f"research/{strategy_id}/backtests/{backtest_id}/runtime.arrow.zstd"
-            await storage_service.upload_arrow_payload(runtime_key, to_table(runtime_events))
+            await storage_service.upload_arrow_payload(runtime_key, events_to_arrow_table(runtime_events))
 
         if decision_traces:
             decision_key = f"research/{strategy_id}/backtests/{backtest_id}/decision.arrow.zstd"
-            await storage_service.upload_arrow_payload(decision_key, to_table(decision_traces))
+            await storage_service.upload_arrow_payload(decision_key, events_to_arrow_table(decision_traces))
 
         # 6. portfolio.arrow.zstd (Placeholder for now as it's not emitted separately)
         # Actually portfolio timeline is often mixed in dataset_registry as 'global_equity_curve'
