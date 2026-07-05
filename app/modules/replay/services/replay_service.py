@@ -227,19 +227,30 @@ class ReplayService:
 
         index = await self._load_index(reader, run_id)
 
-        entry_time = trade.get("entry_time")
-        exit_time = trade.get("exit_time")
+        # Trades point into the event stream (entry_sequence/exit_sequence) —
+        # O(1) resolution, no timestamp scanning.
+        entry_seq = trade.get("entry_sequence")
+        exit_seq = trade.get("exit_sequence")
+        if entry_seq is None or exit_seq is None:
+            raise ValidationException(
+                "Trade is missing event-stream pointers — re-run the backtest to "
+                "regenerate the artifact."
+            )
+        entry_event = index.by_sequence.get(entry_seq)
+        exit_event = index.by_sequence.get(exit_seq)
+        if entry_event is None or exit_event is None:
+            raise ValidationException(
+                "Workspace artifact is corrupt: trade pointers do not resolve to events."
+            )
+
         lifecycle = [
             e for e in index.events
-            if e.get("timestamp") is not None
-            and entry_time is not None and exit_time is not None
-            and entry_time <= e["timestamp"] <= exit_time
+            if entry_seq <= e["sequence_number"] <= exit_seq
             and (e.get("symbol_id") in (None, trade.get("symbol")))
         ]
 
-        candle_indexes = sorted({e["candle_index"] for e in lifecycle if e.get("candle_index") is not None})
-        entry_candle = candle_indexes[0] if candle_indexes else None
-        exit_candle = candle_indexes[-1] if candle_indexes else None
+        entry_candle = entry_event.get("candle_index")
+        exit_candle = exit_event.get("candle_index")
 
         indicators = await self._read_dataset(reader, run_id, "indicator_snapshots", optional=True)
         indicators_by_candle: Dict[int, List[Dict[str, Any]]] = {}
@@ -253,6 +264,8 @@ class ReplayService:
             "trade": trade,
             "entry_candle": entry_candle,
             "exit_candle": exit_candle,
+            "entry_event": entry_event,
+            "exit_event": exit_event,
             "events": lifecycle,
             "entry_tree": index.tree_at(entry_candle),
             "exit_tree": index.tree_at(exit_candle),

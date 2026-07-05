@@ -70,6 +70,9 @@ TRADES = [{
     "trade_id": "t-1", "symbol": "BTCUSD", "side": "long",
     "entry_time": 1_000_000 + 2 * 60_000, "exit_time": 1_000_000 + 3 * 60_000,
     "net_pnl": 5.0,
+    # Engine v2: trades point into the event stream — no reason blobs
+    "entry_sequence": 9,   # POSITION_OPENED at candle 2
+    "exit_sequence": 12,   # POSITION_CLOSED at candle 3
 }]
 
 INDICATORS = [
@@ -235,12 +238,31 @@ async def test_window_bounds(service):
 async def test_trade_endpoint(service):
     result = await service.get_trade("u1", "r1", "t-1")
     assert result["trade"]["trade_id"] == "t-1"
+    # O(1) pointer resolution — candles come from the pointed events
+    assert result["entry_event"]["type"] == "POSITION_OPENED"
+    assert result["exit_event"]["type"] == "POSITION_CLOSED"
     assert result["entry_candle"] == 2
     assert result["exit_candle"] == 3
-    types = [e["type"] for e in result["events"]]
-    assert "ORDER_FILLED" in types and "POSITION_CLOSED" in types
+    # lifecycle = sequence range [entry_sequence, exit_sequence]
+    seqs = [e["sequence_number"] for e in result["events"]]
+    assert min(seqs) == 9 and max(seqs) == 12
+    assert "POSITION_CLOSED" in [e["type"] for e in result["events"]]
     assert result["exit_tree"]["bar"]["children"][0]["type"] == "POSITION_CLOSED"
     assert result["indicators_at_entry"][0]["candle_index"] == 2
+
+
+@pytest.mark.asyncio
+async def test_trade_without_pointers_is_422(service, monkeypatch):
+    """Artifacts whose trades lack event pointers must be regenerated — never guessed."""
+    broken = dict(TRADES[0])
+    broken.pop("entry_sequence"); broken.pop("exit_sequence")
+    FakeWorkspaceReader.datasets = dict(FakeWorkspaceReader.datasets)
+    FakeWorkspaceReader.datasets["trades"] = _table_bytes(pa.Table.from_pylist([broken]))
+    try:
+        with pytest.raises(ValidationException, match="pointers"):
+            await service.get_trade("u1", "r1", "t-1")
+    finally:
+        FakeWorkspaceReader.datasets = _dataset_bytes()
 
 
 @pytest.mark.asyncio
