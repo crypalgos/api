@@ -64,6 +64,11 @@ class Settings(BaseSettings):
     sandbox_enabled: bool = (
         False  # Set SANDBOX_ENABLED=true in .env.prod for Docker gVisor path
     )
+    app_environment: str = Field(
+        default_factory=lambda: (
+            os.environ.get("APP_ENV") or os.environ.get("ENV") or os.environ.get("PY_ENV") or "development"
+        ).lower()
+    )
     encryption_key: str = Field(
         default="dGhpc19pc19hX2RlZmF1bHRfa2V5XzMyYnl0ZXNfISE=",  # default 32-byte urlsafe base64 key
         validation_alias=AliasChoices("encryption_key", "credential_encryption_key")

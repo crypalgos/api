@@ -161,7 +161,14 @@ class ReplayService:
     # ── Session ────────────────────────────────────────────────────────────
 
     async def get_session(self, user_id: str, run_id: str) -> dict:
-        """Replay session bootstrap: validated manifest + timeline markers."""
+        """Replay session bootstrap: validated manifest + timeline markers.
+
+        `bar_count` is a row COUNT, not a range — indicator warmup means the
+        candles dataset's candle_index rarely starts at 0 (e.g. a 100-period
+        EMA burns the first ~100 candles before the strategy runs). Callers
+        must window against [first_candle_index, last_candle_index], never
+        assume [0, bar_count - 1].
+        """
         reader = await self._reader(user_id, run_id)
         manifest = await reader.get_manifest()
         schema_version = self._validate_manifest(manifest)
@@ -169,11 +176,18 @@ class ReplayService:
         index = await self._load_index(reader, run_id)
         dataset_ids = [d.get("dataset_id") for d in manifest.get("datasets", [])]
 
+        candles = await self._read_dataset(reader, run_id, "candles", optional=True)
+        candle_indexes = [c["candle_index"] for c in candles if c.get("candle_index") is not None]
+        first_candle_index = min(candle_indexes) if candle_indexes else None
+        last_candle_index = max(candle_indexes) if candle_indexes else None
+
         return {
             "schema_version": schema_version,
             "engine_version": manifest.get("engine_version"),
             "created_at": manifest.get("created_at"),
             "bar_count": manifest.get("bar_count", 0),
+            "first_candle_index": first_candle_index,
+            "last_candle_index": last_candle_index,
             "trade_count": manifest.get("trade_count", 0),
             "indicator_count": manifest.get("indicator_count", 0),
             "symbols": index.symbols,

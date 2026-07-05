@@ -157,6 +157,10 @@ async def test_session_contents(service):
     assert session["trade_count"] == 1
     assert session["symbols"] == ["BTCUSD"]
     assert session["max_window_candles"] == MAX_REPLAY_WINDOW_CANDLES
+    # Callers must window against the real candle range, not [0, bar_count-1] —
+    # indicator warmup means candle_index rarely starts at 0 in production.
+    assert session["first_candle_index"] == 0
+    assert session["last_candle_index"] == 3
 
     markers = {(m["type"], m["candle_index"]) for m in session["markers"]}
     assert ("entry", 2) in markers

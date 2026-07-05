@@ -1,13 +1,30 @@
+import logging
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.responses import RedirectResponse
 
 from app.advices.global_exception_handler import GlobalExceptionHandler
+from app.config.settings import settings
 from app.modules.strategy_service.routes.strategy_routes import strategy_router
 from app.modules.user_service.routes.auth_routes import auth_router
 from app.modules.user_service.routes.contact_routes import contact_router
 from app.modules.user_service.routes.session_routes import session_router
 from app.modules.user_service.routes.user_routes import user_router
+
+logger = logging.getLogger(__name__)
+
+if settings.app_environment in ("production", "prod", "staging") and not settings.sandbox_enabled:
+    # Not a hard fail: infra readiness (Docker + gVisor) for the sandbox is an
+    # ops decision this process can't verify. But it must be impossible to
+    # silently ship production without it once external users submit strategies.
+    logger.critical(
+        "SECURITY: app_environment=%s but sandbox_enabled=False — user strategy "
+        "code will execute in-process with full credentials. Set "
+        "SANDBOX_ENABLED=true (with Docker + gVisor provisioned) before "
+        "accepting strategies from untrusted users.",
+        settings.app_environment,
+    )
 
 app = FastAPI(
     title="CrypAlgos Api Docs",
