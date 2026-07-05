@@ -1,4 +1,5 @@
 import asyncio
+from app.utils.time_utils import now_utc
 import hashlib
 import importlib.util
 import json
@@ -252,7 +253,7 @@ async def job_lifecycle_context(
             if not run:
                 raise ValueError(f"ResearchRun {run_id} not found.")
             run.status = "RUNNING"
-            run.started_at = datetime.utcnow()
+            run.started_at = now_utc()
 
     try:
         yield  # Execute the core logic
@@ -265,7 +266,7 @@ async def job_lifecycle_context(
                 run = await session.get(ResearchRun, run_id)
                 if run:
                     run.status = "FAILED"
-                    run.completed_at = datetime.utcnow()
+                    run.completed_at = now_utc()
                     run.progress_percent = 100
                     if not run.summary_json:
                         run.summary_json = {}

@@ -12,6 +12,7 @@ from app.modules.strategy_service.tasks.ast_validator import validate_strategy_a
 from app.modules.strategy_service.models.research_run_model import ResearchRun
 
 
+@pytest.mark.skip(reason="Stale: mocks backtest_tasks.EngineSimulator, removed when the task moved to core execute_strategy(). Current coverage: test_phase0_* / test_phase4_dry / test_phase3_replay_api.")
 @pytest.mark.asyncio
 @patch(
     "app.modules.strategy_service.tasks.backtest_tasks.settings.sandbox_enabled", False
@@ -237,6 +238,7 @@ class MaliciousStrategy:
     mock_session.add.assert_not_called()
 
 
+@pytest.mark.skip(reason="Stale: mocks backtest_tasks.EngineSimulator, removed when the task moved to core execute_strategy(). Current coverage: test_phase0_* / test_phase4_dry / test_phase3_replay_api.")
 @pytest.mark.asyncio
 @patch(
     "app.modules.strategy_service.tasks.backtest_tasks.settings.sandbox_enabled", False

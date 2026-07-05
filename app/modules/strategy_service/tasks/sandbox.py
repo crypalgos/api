@@ -26,18 +26,19 @@ def run_in_sandbox(
     Handles data prefetching, volume mounting, and result extraction.
     """
     # 1. Resolve all required datasources from visual Canvas JSON configuration
+    from crypalgos_data.common.symbol_normalizer import normalize_symbol_string
+
     datasources = []
     if strategy.canvas_json:
         for node in strategy.canvas_json.get("nodes", []):
             if node.get("type") == "dataNode":
                 data = node.get("data", {})
-                ds_sym = data.get("symbol", "BTCUSD").replace("/", "").upper()
-                if ds_sym.endswith("USDT"):
-                    ds_sym = ds_sym[:-1]
+                if not data.get("symbol"):
+                    continue
                 datasources.append(
                     {
-                        "symbol": ds_sym,
-                        "exchange": data.get("source", "delta").lower(),
+                        "symbol": normalize_symbol_string(data["symbol"]),
+                        "exchange": (data.get("source") or exchange).lower(),
                         "timeframe": data.get("timeframe", "1m"),
                     }
                 )
@@ -244,23 +245,9 @@ def run():
     )
     bundle = execute_strategy(config)
 
-    report = {
-        "metrics": bundle.report.get("metrics", {}),
-        "market_data": [],
-        "trades": bundle.trades,
-        "runtime_events": bundle.runtime_events,
-        "decision_traces": bundle.decision_traces,
-        "execution_logs": bundle.execution_logs,
-        "orders": bundle.orders,
-        "portfolio_equity": bundle.equity_curve,
-        "portfolio_drawdown": bundle.drawdown_curve,
-        "indicator_snapshots": bundle.indicator_snapshots,
-        "dynamic_datasets": bundle.dynamic_datasets,
-        "report": bundle.report,
-    }
-
+    # The one process-boundary mapping — owned by core, never hand-built
     with open("/sandbox/result.json", "w") as f:
-        json.dump(report, f, default=str)
+        json.dump(bundle.to_payload_dict(), f, default=str)
 
 if __name__ == "__main__":
     try:

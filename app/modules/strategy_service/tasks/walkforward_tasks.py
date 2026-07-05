@@ -1,4 +1,6 @@
 import asyncio
+from app.utils.artifact_paths import ArtifactPaths
+from app.utils.time_utils import now_utc
 import logging
 from datetime import datetime
 from typing import Any
@@ -156,10 +158,9 @@ async def _execute_walkforward_internal(
 
         artifact_size = len(msgpack.packb(report_payload, use_bin_type=True))
 
-        metadata_key = (
-            f"research/{strategy_id}/walkforwards/{run_id}/metadata.msgpack.zstd"
-        )
-        report_key = f"research/{strategy_id}/walkforwards/{run_id}/report.msgpack.zstd"
+        paths = ArtifactPaths(strategy_id=strategy_id, run_id=run_id, kind="walkforwards")
+        metadata_key = paths.metadata
+        report_key = paths.report
 
         await storage_service.upload_payload(metadata_key, meta_payload)
         await storage_service.upload_payload(report_key, report_payload)
@@ -198,7 +199,7 @@ async def _execute_walkforward_internal(
                 run = await session.get(ResearchRun, run_id)
                 if run:
                     run.status = "COMPLETED"
-                    run.completed_at = datetime.utcnow()
+                    run.completed_at = now_utc()
                     run.progress_percent = 100
                     run.metadata_s3_key = metadata_key
                     run.report_s3_key = report_key

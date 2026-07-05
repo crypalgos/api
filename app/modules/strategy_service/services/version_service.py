@@ -1,4 +1,5 @@
 import hashlib
+from app.utils.time_utils import now_utc
 from datetime import datetime
 import difflib
 from sqlalchemy import func, select, update
@@ -65,7 +66,7 @@ class VersionServiceMixin:
 
         strategy.current_version = new_version
         strategy.has_unpublished_changes = False
-        strategy.updated_at = datetime.utcnow()
+        strategy.updated_at = now_utc()
         await self.strategy_repository.update(strategy.id)
 
         return new_snapshot
@@ -111,7 +112,7 @@ class VersionServiceMixin:
 
         strategy.current_version = new_version
         strategy.has_unpublished_changes = False
-        strategy.updated_at = datetime.utcnow()
+        strategy.updated_at = now_utc()
         await self.strategy_repository.update(strategy.id)
 
         return 201, StrategyVersionResponseSchema.model_validate(new_snapshot)
@@ -185,7 +186,7 @@ class VersionServiceMixin:
         # In restore workflow: retaining the active version index but setting has_unpublished_changes = True
         strategy.current_version = snapshot.version
         strategy.has_unpublished_changes = True
-        strategy.updated_at = datetime.utcnow()
+        strategy.updated_at = now_utc()
 
         updated_strategy = await self.strategy_repository.update(strategy.id)
         return 200, StrategyResponseSchema.model_validate(updated_strategy)

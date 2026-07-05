@@ -822,7 +822,7 @@ wheels = [
 [[package]]
 name = "crypalgos-core"
 version = "2.0.0"
-source = { git = "https://github.com/crypalgos/crypalgos_core.git?branch=master#4ba9dd334ff86b1c938787d218885adbc2b88be9" }
+source = { git = "https://github.com/crypalgos/crypalgos_core.git?branch=master#f4ad80c1383f288dc858711604df10ffd99804d2" }
 dependencies = [
     { name = "clickhouse-connect" },
     { name = "crypalgos-data" },
@@ -838,7 +838,7 @@ dependencies = [
 [[package]]
 name = "crypalgos-data"
 version = "0.1.0"
-source = { git = "https://github.com/crypalgos/crypalgos-data.git?branch=master#42b7c1ee30685478931ea72a2ddf467688aefda2" }
+source = { git = "https://github.com/crypalgos/crypalgos-data.git?branch=master#1e25cb20264d3f552130bafe893111537aec4da3" }
 dependencies = [
     { name = "httpx" },
     { name = "pydantic" },

@@ -1,4 +1,5 @@
 import hashlib
+from app.utils.time_utils import now_utc
 import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -122,7 +123,7 @@ class StrategyService(
             if isinstance(code, str)
             else "mock_hash"
         )
-        strategy.updated_at = datetime.utcnow()  # type: ignore[assignment]
+        strategy.updated_at = now_utc()  # type: ignore[assignment]
 
         updated_strategy = await self.strategy_repository.update(strategy.id)
         return 200, StrategyResponseSchema.model_validate(updated_strategy)
@@ -377,7 +378,7 @@ class StrategyService(
             if isinstance(compiled_script, str)
             else "mock_hash"
         )
-        strategy.updated_at = datetime.utcnow()  # type: ignore[assignment]
+        strategy.updated_at = now_utc()  # type: ignore[assignment]
         if name is not None:
             strategy.name = name
         if description is not None:
@@ -411,7 +412,7 @@ class StrategyService(
             if isinstance(compiled_script, str)
             else "mock_hash"
         )
-        strategy.updated_at = datetime.utcnow()  # type: ignore[assignment]
+        strategy.updated_at = now_utc()  # type: ignore[assignment]
 
         updated_strategy = await self.strategy_repository.update(strategy.id)
         return 200, StrategyResponseSchema.model_validate(updated_strategy)
@@ -454,7 +455,7 @@ class StrategyService(
             }
 
         strategy.is_archived = True
-        strategy.updated_at = datetime.utcnow()  # type: ignore[assignment]
+        strategy.updated_at = now_utc()  # type: ignore[assignment]
         await self.strategy_repository.update(strategy.id)
         return 200, {"success": True, "message": "Strategy archived successfully."}
 
@@ -472,6 +473,6 @@ class StrategyService(
             return 200, StrategyResponseSchema.model_validate(strategy).model_dump()
 
         strategy.is_archived = False
-        strategy.updated_at = datetime.utcnow()  # type: ignore[assignment]
+        strategy.updated_at = now_utc()  # type: ignore[assignment]
         updated_strategy = await self.strategy_repository.update(strategy.id)
         return 200, StrategyResponseSchema.model_validate(updated_strategy).model_dump()

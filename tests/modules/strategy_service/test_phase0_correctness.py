@@ -118,4 +118,4 @@ def test_sandbox_runner_uses_default_str():
     from app.modules.strategy_service.tasks import sandbox
 
     src = inspect.getsource(sandbox)
-    assert 'json.dump(report, f, default=str)' in src
+    assert 'json.dump(bundle.to_payload_dict(), f, default=str)' in src

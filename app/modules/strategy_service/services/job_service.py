@@ -1,4 +1,5 @@
 from datetime import datetime
+from app.utils.time_utils import now_utc
 from typing import Any, Dict, List, Optional
 from app.exceptions.exceptions import ResourceNotFoundException
 from app.modules.strategy_service.models.research_run_model import ResearchRun
@@ -38,7 +39,7 @@ class JobServiceMixin:
             strategy_version_id=active_version.id,
             compiled_hash=active_version.compiled_hash,
             parent_run_id=parent_run_id,
-            name=f"Backtest {datetime.utcnow().strftime('%Y-%m-%d %H:%M')}",
+            name=f"Backtest {now_utc().strftime('%Y-%m-%d %H:%M')}",
             status="PENDING",
             progress_percent=0,
             summary_json={},
@@ -92,7 +93,7 @@ class JobServiceMixin:
             strategy_version_id=active_version.id,
             compiled_hash=active_version.compiled_hash,
             parent_run_id=parent_run_id,
-            name=f"Optimization {datetime.utcnow().strftime('%Y-%m-%d %H:%M')}",
+            name=f"Optimization {now_utc().strftime('%Y-%m-%d %H:%M')}",
             status="PENDING",
             progress_percent=0,
             summary_json={},
@@ -162,7 +163,7 @@ class JobServiceMixin:
             strategy_version_id=active_version.id,
             compiled_hash=active_version.compiled_hash,
             parent_run_id=parent_run_id,
-            name=f"WalkForward {datetime.utcnow().strftime('%Y-%m-%d %H:%M')}",
+            name=f"WalkForward {now_utc().strftime('%Y-%m-%d %H:%M')}",
             status="PENDING",
             progress_percent=0,
             summary_json={},
@@ -213,7 +214,7 @@ class JobServiceMixin:
             strategy_version_id=active_version.id,
             compiled_hash=active_version.compiled_hash,
             parent_run_id=source_backtest_id,
-            name=f"Monte Carlo {datetime.utcnow().strftime('%Y-%m-%d %H:%M')}",
+            name=f"Monte Carlo {now_utc().strftime('%Y-%m-%d %H:%M')}",
             status="PENDING",
             progress_percent=0,
             summary_json={},
@@ -323,7 +324,7 @@ class JobServiceMixin:
             run.name = name
         if description is not None:
             run.description = description
-        run.updated_at = datetime.utcnow()
+        run.updated_at = now_utc()
 
         updated_run = await self.run_repository.update(run.id)
         return 200, ResearchRunResponseSchema.model_validate(updated_run)
@@ -343,7 +344,7 @@ class JobServiceMixin:
             raise ResourceNotFoundException("Strategy not found")
 
         run.is_favorite = is_favorite
-        run.updated_at = datetime.utcnow()
+        run.updated_at = now_utc()
 
         updated_run = await self.run_repository.update(run.id)
         return 200, ResearchRunResponseSchema.model_validate(updated_run)

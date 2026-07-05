@@ -1,4 +1,5 @@
 import logging
+from app.utils.time_utils import now_utc
 import base64
 from typing import List, Dict, Any, Optional
 from datetime import datetime
@@ -126,7 +127,7 @@ class CredentialService:
                         passphrase_encrypted=pass_enc,
                         is_testnet=is_testnet,
                         version=existing.version + 1,
-                        updated_at=datetime.utcnow(),
+                        updated_at=now_utc(),
                     )
                 )
                 res = await session.execute(stmt)
@@ -204,12 +205,12 @@ class CredentialService:
                     passphrase_encrypted=pass_enc,
                     version=existing.version + 1,
                     last_verified_at=(
-                        datetime.utcnow()
+                        now_utc()
                         if verify_res.success
                         else existing.last_verified_at
                     ),
                     last_error=None if verify_res.success else verify_res.message,
-                    updated_at=datetime.utcnow(),
+                    updated_at=now_utc(),
                 )
             )
             res = await session.execute(stmt)
@@ -338,7 +339,7 @@ class CredentialService:
                 for key, val in prefs.items():
                     if hasattr(existing, key):
                         setattr(existing, key, val)
-                existing.updated_at = datetime.utcnow()
+                existing.updated_at = now_utc()
             else:
                 new_pref = NotificationPreference(
                     user_id=user_id,
