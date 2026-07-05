@@ -88,7 +88,7 @@ def _table_bytes(table: pa.Table) -> bytes:
     return sink.getvalue()
 
 
-def _manifest(schema_version=2):
+def _manifest(schema_version=3):
     return {
         "schema_version": schema_version,
         "engine_version": "2.0.0",
@@ -152,7 +152,7 @@ def service(monkeypatch):
 @pytest.mark.asyncio
 async def test_session_contents(service):
     session = await service.get_session("u1", "r1")
-    assert session["schema_version"] == 2
+    assert session["schema_version"] == 3
     assert session["bar_count"] == 4
     assert session["trade_count"] == 1
     assert session["symbols"] == ["BTCUSD"]
@@ -169,7 +169,7 @@ async def test_session_contents(service):
 
 @pytest.mark.asyncio
 async def test_session_rejects_wrong_schema(service):
-    """Engine v2: exactly one supported schema — both older and newer rejected."""
+    """Engine v3: exactly one supported schema — both older and newer rejected."""
     for bad_version in (1, 99):
         FakeWorkspaceReader.manifest = _manifest(schema_version=bad_version)
         with pytest.raises(ValidationException, match="not supported"):

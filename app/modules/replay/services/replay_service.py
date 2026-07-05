@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 # Engine v2: exactly one supported artifact schema — no compatibility reads.
 # Older runs are re-generated, not migrated.
-REQUIRED_SCHEMA_VERSION = 2
+REQUIRED_SCHEMA_VERSION = 3
 # Hard limit per window request — the browser never loads more
 MAX_REPLAY_WINDOW_CANDLES = 500
 

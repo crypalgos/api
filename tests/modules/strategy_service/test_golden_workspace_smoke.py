@@ -48,7 +48,7 @@ def _golden_tar_bytes(name: str) -> bytes:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("name", ["single_asset", "multi_asset"])
+@pytest.mark.parametrize("name", ["single_asset", "multi_asset", "compiled_conditions"])
 async def test_full_replay_pipeline_against_golden_artifact(service, name):
     """The complete /session -> /window -> /trades/{id} -> /datasets flow,
     against a real Engine v2 artifact, not synthetic test data."""
@@ -59,7 +59,7 @@ async def test_full_replay_pipeline_against_golden_artifact(service, name):
         new=AsyncMock(return_value=tar_bytes),
     ):
         session = await service.get_session("u1", "run-golden")
-        assert session["schema_version"] == 2
+        assert session["schema_version"] == 3
         assert session["bar_count"] > 0
         assert session["trade_count"] > 0
         # The core warmup gap this test caught: candle_index does NOT start
