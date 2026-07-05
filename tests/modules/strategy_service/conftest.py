@@ -7,7 +7,7 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.main import app
-from app.middlewares.auth_middleware import get_current_user
+from app.middlewares.auth_middleware import CurrentUser, get_current_user
 from app.modules.strategy_service.routes.strategy_routes import get_strategy_service
 from app.modules.strategy_service.models.strategy_model import Strategy
 from app.modules.strategy_service.models.research_run_model import ResearchRun
@@ -103,7 +103,7 @@ def override_current_user():
     """Override the get_current_user dependency."""
 
     async def _get_current_user_override():
-        return {"user_id": "test-user-id"}
+        return CurrentUser(user_id="test-user-id")
 
     app.dependency_overrides[get_current_user] = _get_current_user_override
     yield "test-user-id"

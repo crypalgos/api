@@ -1,4 +1,5 @@
 import asyncio
+from app.modules.strategy_service.schema.strategy_schema import JobStatus, RunType
 import logging
 from datetime import datetime
 from typing import Any
@@ -94,7 +95,7 @@ async def _execute_backtest_internal(
 
             from crypalgos_core import execute_strategy, ExecutionConfig
 
-            flusher = AsyncProgressFlusher(backtest_id, "BACKTEST")
+            flusher = AsyncProgressFlusher(backtest_id, RunType.BACKTEST)
             flusher_task = asyncio.create_task(flusher.start_polling())
 
             try:
@@ -267,7 +268,7 @@ async def _execute_backtest_internal(
             async with session.begin():
                 run = await session.get(ResearchRun, backtest_id)
                 if run:
-                    run.status = "COMPLETED"
+                    run.status=JobStatus.COMPLETED
                     run.completed_at = now_utc()
                     run.progress_percent = 100
 

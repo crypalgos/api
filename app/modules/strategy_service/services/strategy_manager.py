@@ -1,4 +1,5 @@
 import sys
+from app.modules.strategy_service.schema.strategy_schema import JobStatus
 import logging
 import asyncio
 from typing import Dict, Any, Type, Optional
@@ -131,7 +132,7 @@ class StrategyManager:
         runner = self.active_runners[run_id]
         balances = runner.broker.get_balances()
         return {
-            "status": "RUNNING" if runner.is_running else "FAILED",
+            "status": JobStatus.RUNNING if runner.is_running else JobStatus.FAILED,
             "mode": runner.context.mode.name,
             "started_at": runner.context.started_at,
             "cash": balances.get("cash", 0.0),

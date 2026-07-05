@@ -1,6 +1,7 @@
 """Shared fixtures for route tests."""
 
 from collections.abc import AsyncGenerator
+from app.middlewares.auth_middleware import CurrentUser
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -122,7 +123,7 @@ def override_current_user():
     """Override the get_current_user and get_current_user_data dependencies."""
 
     async def _get_current_user_override():
-        return {"user_id": "test-user-id"}
+        return CurrentUser(user_id="test-user-id")
 
     async def _get_current_user_data_override():
         return "test-user-id", "test-refresh-token"

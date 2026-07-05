@@ -608,7 +608,7 @@ async def logout_user(
 
 from fastapi.security import HTTPBearer
 
-from app.middlewares.auth_middleware import get_admin_user
+from app.middlewares.auth_middleware import CurrentUser, get_admin_user
 from app.modules.user_service.repositories.waitlist_repository import WaitlistRepository
 from app.modules.user_service.schema.waitlist_schema import (
     WaitlistResponseSchema,
@@ -666,7 +666,7 @@ async def get_waitlist(
     offset: int = 0,
     limit: int = 50,
     query: str = "",
-    admin_user: dict = Depends(get_admin_user),
+    admin_user: CurrentUser = Depends(get_admin_user),
     waitlist_service: WaitlistService = Depends(get_waitlist_service),
 ) -> JSONResponse:
     """Admin-only endpoint to list waitlist subscribers"""
@@ -690,7 +690,7 @@ async def get_waitlist(
 )
 async def delete_waitlist(
     email: str,
-    admin_user: dict = Depends(get_admin_user),
+    admin_user: CurrentUser = Depends(get_admin_user),
     waitlist_service: WaitlistService = Depends(get_waitlist_service),
 ) -> JSONResponse:
     """Admin-only endpoint to delete a waitlist subscriber by email"""

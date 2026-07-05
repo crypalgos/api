@@ -1,21 +1,28 @@
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field, model_validator
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Shared Enums
+# Shared Enums — the only source of run status/type strings (never literals)
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-class JobStatus(str, Enum):
+class JobStatus(StrEnum):
     PENDING = "PENDING"
     RUNNING = "RUNNING"
     COMPLETED = "COMPLETED"
     FAILED = "FAILED"
     CANCELLED = "CANCELLED"
     RETRYING = "RETRYING"
+
+
+class RunType(StrEnum):
+    BACKTEST = "BACKTEST"
+    OPTIMIZATION = "OPTIMIZATION"
+    WALKFORWARD = "WALKFORWARD"
+    MONTECARLO = "MONTECARLO"
 
 
 # ─────────────────────────────────────────────────────────────────────────────

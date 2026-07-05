@@ -60,6 +60,7 @@ class Settings(BaseSettings):
     resend_from_name: str = "CrypAlgos Platform"
     google_client_id: str = ""
     google_client_secret: str = ""
+    admin_email: str = "ashishjangde54@gmail.com"  # override with ADMIN_EMAIL
     sandbox_enabled: bool = (
         False  # Set SANDBOX_ENABLED=true in .env.prod for Docker gVisor path
     )

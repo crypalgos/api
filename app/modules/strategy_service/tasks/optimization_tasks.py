@@ -1,4 +1,5 @@
 import asyncio
+from app.modules.strategy_service.schema.strategy_schema import JobStatus, RunType
 from app.utils.artifact_paths import ArtifactPaths
 from app.utils.time_utils import now_utc
 import logging
@@ -78,7 +79,7 @@ async def _execute_optimization_internal(
                 .where(
                     ResearchRun.strategy_id == strategy_id,
                     ResearchRun.run_hash == run_hash,
-                    ResearchRun.status == "COMPLETED",
+                    ResearchRun.status == JobStatus.COMPLETED,
                 )
                 .order_by(ResearchRun.completed_at.desc())
                 .limit(1)
@@ -93,7 +94,7 @@ async def _execute_optimization_internal(
                 async with session.begin():
                     run = await session.get(ResearchRun, run_id)
                     if run:
-                        run.status = "COMPLETED"
+                        run.status=JobStatus.COMPLETED
                         run.completed_at = now_utc()
                         run.progress_percent = 100
                         run.metadata_s3_key = duplicate_run.metadata_s3_key
@@ -148,7 +149,7 @@ async def _execute_optimization_internal(
         )
 
         # Setup progress flusher
-        flusher = AsyncProgressFlusher(run_id, "OPTIMIZATION")
+        flusher = AsyncProgressFlusher(run_id, RunType.OPTIMIZATION)
         flusher_task = asyncio.create_task(flusher.start_polling())
 
         # Run Engine in background thread
@@ -219,7 +220,7 @@ async def _execute_optimization_internal(
             async with session.begin():
                 run = await session.get(ResearchRun, run_id)
                 if run:
-                    run.status = "COMPLETED"
+                    run.status=JobStatus.COMPLETED
                     run.completed_at = now_utc()
                     run.progress_percent = 100
                     run.metadata_s3_key = metadata_key

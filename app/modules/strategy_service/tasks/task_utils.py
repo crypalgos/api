@@ -1,4 +1,5 @@
 import asyncio
+from app.modules.strategy_service.schema.strategy_schema import JobStatus, RunType
 from app.utils.time_utils import now_utc
 import hashlib
 import importlib.util
@@ -166,6 +167,15 @@ async def load_and_compile_strategy(
 from app.modules.strategy_service.models.research_run_model import ResearchRun
 
 
+# Progress field names per run type — registry, not an elif chain
+PROGRESS_KEYS = {
+    RunType.BACKTEST: ("processed_candles", "total_candles"),
+    RunType.OPTIMIZATION: ("completed_combinations", "total_combinations"),
+    RunType.WALKFORWARD: ("completed_windows", "total_windows"),
+    RunType.MONTECARLO: ("completed_simulations", "total_simulations"),
+}
+
+
 class AsyncProgressFlusher:
     """
     Safely bridges synchronous deep engine simulation loops with asynchronous DB writes.
@@ -173,9 +183,9 @@ class AsyncProgressFlusher:
     The `start_polling` asyncio task wakes up periodically and commits the latest values to the DB.
     """
 
-    def __init__(self, run_id: str, run_type: str, flush_interval: float = 2.0):
+    def __init__(self, run_id: str, run_type: RunType, flush_interval: float = 2.0):
         self.run_id = run_id
-        self.run_type = run_type
+        self.run_type = RunType(run_type)
         self.flush_interval = flush_interval
         self._completed = 0
         self._total = 0
@@ -202,27 +212,14 @@ class AsyncProgressFlusher:
                 try:
                     percent = int((c / t) * 100)
                     progress_info = {"progress_percent": percent}
-                    if self.run_type == "BACKTEST":
-                        progress_info.update(
-                            {"processed_candles": c, "total_candles": t}
-                        )
-                    elif self.run_type == "OPTIMIZATION":
-                        progress_info.update(
-                            {"completed_combinations": c, "total_combinations": t}
-                        )
-                    elif self.run_type == "WALKFORWARD":
-                        progress_info.update(
-                            {"completed_windows": c, "total_windows": t}
-                        )
-                    elif self.run_type == "MONTECARLO":
-                        progress_info.update(
-                            {"completed_simulations": c, "total_simulations": t}
-                        )
+                    completed_key, total_key = PROGRESS_KEYS[self.run_type]
+                    progress_info[completed_key] = c
+                    progress_info[total_key] = t
 
                     async with AsyncSessionLocal() as session:
                         async with session.begin():
                             run = await session.get(ResearchRun, self.run_id)
-                            if run and run.status == "RUNNING":
+                            if run and run.status == JobStatus.RUNNING:
                                 run.progress_percent = percent
                                 run.progress_json = progress_info
                 except Exception as e:
@@ -252,7 +249,7 @@ async def job_lifecycle_context(
             run = await session.get(ResearchRun, run_id)
             if not run:
                 raise ValueError(f"ResearchRun {run_id} not found.")
-            run.status = "RUNNING"
+            run.status=JobStatus.RUNNING
             run.started_at = now_utc()
 
     try:
@@ -265,7 +262,7 @@ async def job_lifecycle_context(
             async with session.begin():
                 run = await session.get(ResearchRun, run_id)
                 if run:
-                    run.status = "FAILED"
+                    run.status=JobStatus.FAILED
                     run.completed_at = now_utc()
                     run.progress_percent = 100
                     if not run.summary_json:

@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.advices.base_response_handler import BaseResponseHandler
 from app.advices.responses import ErrorResponseSchema, SuccessResponseSchema
 from app.db.connect_db import get_db
-from app.middlewares.auth_middleware import get_current_user
+from app.middlewares.auth_middleware import CurrentUser, get_current_user
 from app.modules.strategy_service.repositories.research_run_repository import (
     ResearchRunRepository,
 )
@@ -85,12 +85,12 @@ strategy_router.include_router(live_router)
 async def rename_run(
     run_id: str,
     data: EditResearchRunRequestSchema,
-    user: Annotated[dict, Depends(get_current_user)],
+    user: Annotated[CurrentUser, Depends(get_current_user)],
     strategy_service: StrategyService = Depends(get_strategy_service),
 ) -> JSONResponse:
     """Edit a run's name and/or description."""
     status_code, result = await strategy_service.edit_run(
-        user_id=user["user_id"],
+        user_id=user.user_id,
         run_id=run_id,
         name=data.name,
         description=data.description,
@@ -108,12 +108,12 @@ async def rename_run(
 async def favorite_run(
     run_id: str,
     data: FavoriteResearchRunRequestSchema,
-    user: Annotated[dict, Depends(get_current_user)],
+    user: Annotated[CurrentUser, Depends(get_current_user)],
     strategy_service: StrategyService = Depends(get_strategy_service),
 ) -> JSONResponse:
     """Toggle favorite status of a run."""
     status_code, result = await strategy_service.toggle_run_favorite(
-        user_id=user["user_id"], run_id=run_id, is_favorite=data.is_favorite
+        user_id=user.user_id, run_id=run_id, is_favorite=data.is_favorite
     )
     return BaseResponseHandler.success_response(data=result, status_code=status_code)
 
@@ -124,11 +124,11 @@ async def favorite_run(
 )
 async def delete_run(
     run_id: str,
-    user: Annotated[dict, Depends(get_current_user)],
+    user: Annotated[CurrentUser, Depends(get_current_user)],
     strategy_service: StrategyService = Depends(get_strategy_service),
 ) -> JSONResponse:
     """Delete a run from PostgreSQL database and clear its compressed msgpack payloads from storage."""
-    status_code, result = await strategy_service.delete_run(user["user_id"], run_id)
+    status_code, result = await strategy_service.delete_run(user.user_id, run_id)
     return BaseResponseHandler.success_response(data=result, status_code=status_code)
 
 
@@ -141,12 +141,12 @@ async def delete_run(
 )
 async def get_run_progress(
     run_id: str,
-    user: Annotated[dict, Depends(get_current_user)],
+    user: Annotated[CurrentUser, Depends(get_current_user)],
     strategy_service: StrategyService = Depends(get_strategy_service),
 ) -> JSONResponse:
     """Fetch real-time active task progress metrics."""
     status_code, result = await strategy_service.get_run_progress(
-        user["user_id"], run_id
+        user.user_id, run_id
     )
     return BaseResponseHandler.success_response(data=result, status_code=status_code)
 
@@ -159,11 +159,11 @@ async def get_run_progress(
     },
 )
 async def get_templates(
-    user: Annotated[dict, Depends(get_current_user)],
+    user: Annotated[CurrentUser, Depends(get_current_user)],
     strategy_service: StrategyService = Depends(get_strategy_service),
 ) -> JSONResponse:
     """Fetch strategy templates library with pre-loaded latest results mapping summaries (no S3 scanning)."""
-    status_code, result = await strategy_service.get_template_library(user["user_id"])
+    status_code, result = await strategy_service.get_template_library(user.user_id)
     return BaseResponseHandler.success_response(data=result, status_code=status_code)
 
 
@@ -186,14 +186,14 @@ class DeployRequest(BaseModel):
 async def deploy_strategy(
     strategy_id: str,
     payload: DeployRequest,
-    user: Annotated[dict, Depends(get_current_user)],
+    user: Annotated[CurrentUser, Depends(get_current_user)],
 ) -> JSONResponse:
     """Deploy a strategy class dynamically in PAPER or LIVE mode."""
     mode_enum = ExecutionMode[payload.mode.upper()]
     await strategy_manager.deploy(
         strategy_id=strategy_id,
         run_id=payload.run_id,
-        user_id=user["user_id"],
+        user_id=user.user_id,
         mode=mode_enum,
         initial_capital=payload.initial_capital,
         leverage=payload.leverage,
@@ -208,7 +208,7 @@ async def deploy_strategy(
     dependencies=[Depends(security)],
 )
 async def stop_run(
-    run_id: str, user: Annotated[dict, Depends(get_current_user)]
+    run_id: str, user: Annotated[CurrentUser, Depends(get_current_user)]
 ) -> JSONResponse:
     """Stop a running strategy runner."""
     await strategy_manager.stop(run_id)
@@ -222,7 +222,7 @@ async def stop_run(
     dependencies=[Depends(security)],
 )
 async def get_run_status(
-    run_id: str, user: Annotated[dict, Depends(get_current_user)]
+    run_id: str, user: Annotated[CurrentUser, Depends(get_current_user)]
 ) -> JSONResponse:
     """Get the running status and latest metrics of an active strategy runner."""
     status = strategy_manager.get_status(run_id)

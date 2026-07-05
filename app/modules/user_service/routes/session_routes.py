@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.advices.responses import ErrorResponseSchema, SuccessResponseSchema
 from app.db.connect_db import get_db
-from app.middlewares.auth_middleware import get_current_user
+from app.middlewares.auth_middleware import CurrentUser, get_current_user
 
 from ..repositories.session_repository import SessionRepository
 from ..repositories.user_repository import UserRepository
@@ -39,7 +39,7 @@ async def get_session_service(
 
 async def get_current_user_data(
     request: Request,
-    current_user: dict = Depends(get_current_user),
+    current_user: CurrentUser = Depends(get_current_user),
 ) -> tuple[str, str]:
     """
     Dependency to get current user ID and refresh token from authenticated user and cookies.
@@ -47,7 +47,7 @@ async def get_current_user_data(
     :param current_user: The authenticated user information from dependency.
     :return: Tuple of (user_id, refresh_token).
     """
-    user_id = current_user["user_id"]
+    user_id = current_user.user_id
 
     # Get refresh token from cookies
     refresh_token = request.cookies.get("refresh_token", "")

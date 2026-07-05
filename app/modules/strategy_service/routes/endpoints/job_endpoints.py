@@ -5,7 +5,7 @@ from fastapi.responses import JSONResponse
 
 from app.advices.base_response_handler import BaseResponseHandler
 from app.advices.responses import ErrorResponseSchema, SuccessResponseSchema
-from app.middlewares.auth_middleware import get_current_user
+from app.middlewares.auth_middleware import CurrentUser, get_current_user
 from app.modules.strategy_service.schema.strategy_schema import (
     BacktestTriggerRequestSchema,
     ResearchRunTriggerResponseSchema,
@@ -36,12 +36,12 @@ job_router = APIRouter()
 async def trigger_backtest(
     strategy_id: str,
     data: BacktestTriggerRequestSchema,
-    user: Annotated[dict, Depends(get_current_user)],
+    user: Annotated[CurrentUser, Depends(get_current_user)],
     strategy_service: StrategyService = Depends(get_strategy_service),
 ) -> JSONResponse:
     """Trigger a backtest task run."""
     status_code, result = await strategy_service.trigger_backtest(
-        user_id=user["user_id"],
+        user_id=user.user_id,
         strategy_id=strategy_id,
         start_date=data.start_date,
         end_date=data.end_date,
@@ -61,12 +61,12 @@ async def trigger_backtest(
 async def trigger_optimization(
     strategy_id: str,
     data: OptimizationRequestSchema,
-    user: Annotated[dict, Depends(get_current_user)],
+    user: Annotated[CurrentUser, Depends(get_current_user)],
     strategy_service: StrategyService = Depends(get_strategy_service),
 ) -> JSONResponse:
     """Trigger a parameter space optimization run."""
     status_code, result = await strategy_service.trigger_optimization(
-        user_id=user["user_id"],
+        user_id=user.user_id,
         strategy_id=strategy_id,
         start_date=data.start_date,
         end_date=data.end_date,
@@ -91,12 +91,12 @@ async def trigger_optimization(
 async def trigger_walkforward(
     strategy_id: str,
     data: WalkForwardRequestSchema,
-    user: Annotated[dict, Depends(get_current_user)],
+    user: Annotated[CurrentUser, Depends(get_current_user)],
     strategy_service: StrategyService = Depends(get_strategy_service),
 ) -> JSONResponse:
     """Trigger a walkforward validation run."""
     status_code, result = await strategy_service.trigger_walkforward(
-        user_id=user["user_id"],
+        user_id=user.user_id,
         strategy_id=strategy_id,
         start_date=data.start_date,
         end_date=data.end_date,
@@ -123,12 +123,12 @@ async def trigger_walkforward(
 async def trigger_montecarlo(
     strategy_id: str,
     data: MonteCarloRequestSchema,
-    user: Annotated[dict, Depends(get_current_user)],
+    user: Annotated[CurrentUser, Depends(get_current_user)],
     strategy_service: StrategyService = Depends(get_strategy_service),
 ) -> JSONResponse:
     """Trigger a Monte Carlo robustness run."""
     status_code, result = await strategy_service.trigger_montecarlo(
-        user_id=user["user_id"],
+        user_id=user.user_id,
         strategy_id=strategy_id,
         source_backtest_id=data.source_backtest_id,
         simulation_count=data.simulation_count,
@@ -147,7 +147,7 @@ async def trigger_montecarlo(
 )
 async def list_backtests(
     strategy_id: str,
-    user: Annotated[dict, Depends(get_current_user)],
+    user: Annotated[CurrentUser, Depends(get_current_user)],
     status: Optional[str] = None,
     is_favorite: Optional[bool] = None,
     sort_by: str = "updated_at",
@@ -157,7 +157,7 @@ async def list_backtests(
 ) -> JSONResponse:
     """List historical backtests for a strategy."""
     status_code, result = await strategy_service.list_runs(
-        user_id=user["user_id"],
+        user_id=user.user_id,
         strategy_id=strategy_id,
         run_type="BACKTEST",
         status=status,
@@ -179,12 +179,12 @@ async def list_backtests(
 async def get_backtest(
     strategy_id: str,
     run_id: str,
-    user: Annotated[dict, Depends(get_current_user)],
+    user: Annotated[CurrentUser, Depends(get_current_user)],
     strategy_service: StrategyService = Depends(get_strategy_service),
 ) -> JSONResponse:
     """Fetch details of a single backtest run."""
     status_code, result = await strategy_service.get_run(
-        user["user_id"], strategy_id=strategy_id, run_id=run_id
+        user.user_id, strategy_id=strategy_id, run_id=run_id
     )
     return BaseResponseHandler.success_response(data=result, status_code=status_code)
 
@@ -198,7 +198,7 @@ async def get_backtest(
 )
 async def list_optimizations(
     strategy_id: str,
-    user: Annotated[dict, Depends(get_current_user)],
+    user: Annotated[CurrentUser, Depends(get_current_user)],
     status: Optional[str] = None,
     is_favorite: Optional[bool] = None,
     sort_by: str = "updated_at",
@@ -208,7 +208,7 @@ async def list_optimizations(
 ) -> JSONResponse:
     """List parameter optimizations for a strategy."""
     status_code, result = await strategy_service.list_runs(
-        user_id=user["user_id"],
+        user_id=user.user_id,
         strategy_id=strategy_id,
         run_type="OPTIMIZATION",
         status=status,
@@ -229,7 +229,7 @@ async def list_optimizations(
 )
 async def list_walkforwards(
     strategy_id: str,
-    user: Annotated[dict, Depends(get_current_user)],
+    user: Annotated[CurrentUser, Depends(get_current_user)],
     status: Optional[str] = None,
     is_favorite: Optional[bool] = None,
     sort_by: str = "updated_at",
@@ -239,7 +239,7 @@ async def list_walkforwards(
 ) -> JSONResponse:
     """List walkforward runs for a strategy."""
     status_code, result = await strategy_service.list_runs(
-        user_id=user["user_id"],
+        user_id=user.user_id,
         strategy_id=strategy_id,
         run_type="WALKFORWARD",
         status=status,
@@ -260,7 +260,7 @@ async def list_walkforwards(
 )
 async def list_montecarlos(
     strategy_id: str,
-    user: Annotated[dict, Depends(get_current_user)],
+    user: Annotated[CurrentUser, Depends(get_current_user)],
     status: Optional[str] = None,
     is_favorite: Optional[bool] = None,
     sort_by: str = "updated_at",
@@ -270,7 +270,7 @@ async def list_montecarlos(
 ) -> JSONResponse:
     """List Monte Carlo simulation runs for a strategy."""
     status_code, result = await strategy_service.list_runs(
-        user_id=user["user_id"],
+        user_id=user.user_id,
         strategy_id=strategy_id,
         run_type="MONTECARLO",
         status=status,

@@ -1,4 +1,5 @@
 import uuid
+from app.modules.strategy_service.schema.strategy_schema import JobStatus
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
@@ -60,7 +61,7 @@ class ResearchRun(Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(String, nullable=True, default=None)
     is_favorite: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    status: Mapped[str] = mapped_column(String(32), default="PENDING", nullable=False)
+    status: Mapped[str] = mapped_column(String(32), default=JobStatus.PENDING, nullable=False)
     progress_percent: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     progress_json: Mapped[Dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     report_version: Mapped[str | None] = mapped_column(String(32), nullable=True)

@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.advices.base_response_handler import BaseResponseHandler
 from app.advices.responses import ErrorResponseSchema, SuccessResponseSchema
 from app.db.connect_db import get_db
-from app.middlewares.auth_middleware import get_admin_user
+from app.middlewares.auth_middleware import CurrentUser, get_admin_user
 from app.modules.user_service.repositories.contact_repository import ContactRepository
 from app.modules.user_service.schema.contact_schema import (
     ContactCreateSchema,
@@ -78,7 +78,7 @@ async def get_contact_messages(
     offset: int = 0,
     limit: int = 50,
     query: str = "",
-    admin_user: dict = Depends(get_admin_user),
+    admin_user: CurrentUser = Depends(get_admin_user),
     contact_service: ContactService = Depends(get_contact_service),
 ) -> JSONResponse:
     """
@@ -109,7 +109,7 @@ async def get_contact_messages(
 )
 async def delete_contact_message(
     id: str,
-    admin_user: dict = Depends(get_admin_user),
+    admin_user: CurrentUser = Depends(get_admin_user),
     contact_service: ContactService = Depends(get_contact_service),
 ) -> JSONResponse:
     """

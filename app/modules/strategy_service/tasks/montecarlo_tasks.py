@@ -1,4 +1,5 @@
 import asyncio
+from app.modules.strategy_service.schema.strategy_schema import JobStatus, RunType
 from app.utils.artifact_paths import ArtifactPaths
 from app.utils.time_utils import now_utc
 import logging
@@ -147,7 +148,7 @@ async def _execute_montecarlo_internal(
             async with session.begin():
                 run = await session.get(ResearchRun, run_id)
                 if run:
-                    run.status = "COMPLETED"
+                    run.status=JobStatus.COMPLETED
                     run.completed_at = now_utc()
                     run.progress_percent = 100
                     run.metadata_s3_key = metadata_key

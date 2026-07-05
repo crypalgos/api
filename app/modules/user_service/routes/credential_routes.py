@@ -4,7 +4,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from typing import Optional
 from app.advices.base_response_handler import BaseResponseHandler
-from app.middlewares.auth_middleware import get_current_user
+from app.middlewares.auth_middleware import CurrentUser, get_current_user
 from app.modules.user_service.services.credential_service import (
     credential_service,
     Exchange,
@@ -46,9 +46,9 @@ class SaveNotificationPreferenceSchema(BaseModel):
 
 @credential_router.post("/broker")
 async def save_broker(
-    payload: SaveBrokerCredentialSchema, current_user: dict = Depends(get_current_user)
+    payload: SaveBrokerCredentialSchema, current_user: CurrentUser = Depends(get_current_user)
 ) -> JSONResponse:
-    user_id = current_user["user_id"]
+    user_id = current_user.user_id
     try:
         cred_id = await credential_service.save_broker_credential(
             user_id=user_id,
@@ -72,7 +72,7 @@ async def save_broker(
 @credential_router.post("/broker/verify")
 async def verify_broker(
     payload: VerifyBrokerCredentialSchema,
-    current_user: dict = Depends(get_current_user),
+    current_user: CurrentUser = Depends(get_current_user),
 ) -> JSONResponse:
     res = await credential_service.verify_broker_credential(
         exchange=payload.exchange,
@@ -95,8 +95,8 @@ async def verify_broker(
 
 
 @credential_router.get("/broker")
-async def list_brokers(current_user: dict = Depends(get_current_user)) -> JSONResponse:
-    user_id = current_user["user_id"]
+async def list_brokers(current_user: CurrentUser = Depends(get_current_user)) -> JSONResponse:
+    user_id = current_user.user_id
     creds = await credential_service.list_user_credentials(user_id)
     return BaseResponseHandler.success_response(data=creds, status_code=200)
 
@@ -104,9 +104,9 @@ async def list_brokers(current_user: dict = Depends(get_current_user)) -> JSONRe
 @credential_router.post("/preferences/notifications")
 async def save_notification_pref(
     payload: SaveNotificationPreferenceSchema,
-    current_user: dict = Depends(get_current_user),
+    current_user: CurrentUser = Depends(get_current_user),
 ) -> JSONResponse:
-    user_id = current_user["user_id"]
+    user_id = current_user.user_id
     await credential_service.save_notification_preference(user_id, payload.model_dump())
     return BaseResponseHandler.success_response(
         message="Notification preferences updated successfully.", status_code=200
@@ -115,9 +115,9 @@ async def save_notification_pref(
 
 @credential_router.get("/preferences/notifications")
 async def get_notification_pref(
-    current_user: dict = Depends(get_current_user),
+    current_user: CurrentUser = Depends(get_current_user),
 ) -> JSONResponse:
-    user_id = current_user["user_id"]
+    user_id = current_user.user_id
     prefs = await credential_service.get_notification_preference(user_id)
     return BaseResponseHandler.success_response(data=prefs, status_code=200)
 
@@ -132,9 +132,9 @@ class RotateBrokerCredentialSchema(BaseModel):
 async def rotate_broker(
     credential_id: str,
     payload: RotateBrokerCredentialSchema,
-    current_user: dict = Depends(get_current_user),
+    current_user: CurrentUser = Depends(get_current_user),
 ) -> JSONResponse:
-    user_id = current_user["user_id"]
+    user_id = current_user.user_id
     try:
         success = await credential_service.rotate_broker_credential(
             credential_id=credential_id,

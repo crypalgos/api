@@ -1,4 +1,5 @@
 import asyncio
+from app.modules.strategy_service.schema.strategy_schema import JobStatus, RunType
 from app.utils.artifact_paths import ArtifactPaths
 from app.utils.time_utils import now_utc
 import logging
@@ -125,7 +126,7 @@ async def _execute_walkforward_internal(
         run_hash = hashlib.sha256(hash_str.encode("utf-8")).hexdigest()
 
         # Setup progress flusher
-        flusher = AsyncProgressFlusher(run_id, "WALKFORWARD")
+        flusher = AsyncProgressFlusher(run_id, RunType.WALKFORWARD)
         flusher_task = asyncio.create_task(flusher.start_polling())
 
         wf_engine = WalkForwardEngine()
@@ -198,7 +199,7 @@ async def _execute_walkforward_internal(
             async with session.begin():
                 run = await session.get(ResearchRun, run_id)
                 if run:
-                    run.status = "COMPLETED"
+                    run.status=JobStatus.COMPLETED
                     run.completed_at = now_utc()
                     run.progress_percent = 100
                     run.metadata_s3_key = metadata_key

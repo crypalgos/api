@@ -1,6 +1,7 @@
 """Tests for contact messages routes."""
 
 from datetime import UTC, datetime
+from app.middlewares.auth_middleware import CurrentUser
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -48,7 +49,7 @@ def override_admin_user():
     """Override the get_admin_user dependency to return a mock admin."""
 
     async def _get_admin_user_override():
-        return {"user_id": "admin-id", "email": "ashishjangde54@gmail.com"}
+        return CurrentUser(user_id="admin-id", email="ashishjangde54@gmail.com")
 
     app.dependency_overrides[get_admin_user] = _get_admin_user_override
     yield

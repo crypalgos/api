@@ -1,4 +1,5 @@
 from datetime import datetime
+from app.modules.strategy_service.schema.strategy_schema import JobStatus, RunType
 from app.utils.time_utils import now_utc
 from typing import Any, Dict, List, Optional
 from app.exceptions.exceptions import ResourceNotFoundException
@@ -35,12 +36,12 @@ class JobServiceMixin:
 
         run = ResearchRun(
             strategy_id=strategy_id,
-            run_type="BACKTEST",
+            run_type=RunType.BACKTEST,
             strategy_version_id=active_version.id,
             compiled_hash=active_version.compiled_hash,
             parent_run_id=parent_run_id,
             name=f"Backtest {now_utc().strftime('%Y-%m-%d %H:%M')}",
-            status="PENDING",
+            status=JobStatus.PENDING,
             progress_percent=0,
             summary_json={},
         )
@@ -58,7 +59,7 @@ class JobServiceMixin:
         return 202, {
             "run_id": created_run.id,
             "task_id": task.id,
-            "status": "PENDING",
+            "status": JobStatus.PENDING,
             "message": "Backtest enqueued successfully.",
         }
 
@@ -89,12 +90,12 @@ class JobServiceMixin:
 
         run = ResearchRun(
             strategy_id=strategy_id,
-            run_type="OPTIMIZATION",
+            run_type=RunType.OPTIMIZATION,
             strategy_version_id=active_version.id,
             compiled_hash=active_version.compiled_hash,
             parent_run_id=parent_run_id,
             name=f"Optimization {now_utc().strftime('%Y-%m-%d %H:%M')}",
-            status="PENDING",
+            status=JobStatus.PENDING,
             progress_percent=0,
             summary_json={},
         )
@@ -117,7 +118,7 @@ class JobServiceMixin:
         return 202, {
             "run_id": created_run.id,
             "task_id": task.id,
-            "status": "PENDING",
+            "status": JobStatus.PENDING,
             "message": "Optimization enqueued successfully.",
         }
 
@@ -159,12 +160,12 @@ class JobServiceMixin:
 
         run = ResearchRun(
             strategy_id=strategy_id,
-            run_type="WALKFORWARD",
+            run_type=RunType.WALKFORWARD,
             strategy_version_id=active_version.id,
             compiled_hash=active_version.compiled_hash,
             parent_run_id=parent_run_id,
             name=f"WalkForward {now_utc().strftime('%Y-%m-%d %H:%M')}",
-            status="PENDING",
+            status=JobStatus.PENDING,
             progress_percent=0,
             summary_json={},
         )
@@ -184,7 +185,7 @@ class JobServiceMixin:
         return 202, {
             "run_id": created_run.id,
             "task_id": task.id,
-            "status": "PENDING",
+            "status": JobStatus.PENDING,
             "message": "WalkForward enqueued successfully.",
         }
 
@@ -210,12 +211,12 @@ class JobServiceMixin:
 
         run = ResearchRun(
             strategy_id=strategy_id,
-            run_type="MONTECARLO",
+            run_type=RunType.MONTECARLO,
             strategy_version_id=active_version.id,
             compiled_hash=active_version.compiled_hash,
             parent_run_id=source_backtest_id,
             name=f"Monte Carlo {now_utc().strftime('%Y-%m-%d %H:%M')}",
-            status="PENDING",
+            status=JobStatus.PENDING,
             progress_percent=0,
             summary_json={},
         )
@@ -234,7 +235,7 @@ class JobServiceMixin:
         return 202, {
             "run_id": created_run.id,
             "task_id": task.id,
-            "status": "PENDING",
+            "status": JobStatus.PENDING,
             "message": "Monte Carlo enqueued successfully.",
         }
 
@@ -412,16 +413,17 @@ class JobServiceMixin:
         if not latest:
             raise ResourceNotFoundException("Latest run not found for this strategy.")
 
-        run_id = None
-        rt_upper = run_type.upper()
-        if rt_upper == "BACKTEST":
-            run_id = latest.latest_backtest_id
-        elif rt_upper == "OPTIMIZATION":
-            run_id = latest.latest_optimization_id
-        elif rt_upper == "WALKFORWARD":
-            run_id = latest.latest_walkforward_id
-        elif rt_upper == "MONTECARLO":
-            run_id = latest.latest_montecarlo_id
+        latest_id_fields = {
+            RunType.BACKTEST: "latest_backtest_id",
+            RunType.OPTIMIZATION: "latest_optimization_id",
+            RunType.WALKFORWARD: "latest_walkforward_id",
+            RunType.MONTECARLO: "latest_montecarlo_id",
+        }
+        try:
+            run_type_enum = RunType(run_type.upper())
+        except ValueError:
+            raise ResourceNotFoundException(f"Unknown run type '{run_type}'.")
+        run_id = getattr(latest, latest_id_fields[run_type_enum])
 
         if not run_id:
             raise ResourceNotFoundException("Latest run not found for this strategy.")
