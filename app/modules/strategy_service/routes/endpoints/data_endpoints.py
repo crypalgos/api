@@ -50,6 +50,23 @@ async def get_run_dataset_chart(
 
 
 @data_router.get(
+    "/research-runs/{run_id}/montecarlo-datasets/{dataset_name}",
+    dependencies=[Depends(security)],
+)
+async def get_montecarlo_dataset(
+    run_id: str,
+    dataset_name: str,
+    user: Annotated[CurrentUser, Depends(get_current_user)],
+    strategy_service: StrategyService = Depends(get_strategy_service),
+) -> JSONResponse:
+    """Download one of the Monte Carlo chart datasets (equity_fan, returns, drawdowns, sharpes)."""
+    status_code, result = await strategy_service.get_montecarlo_dataset(
+        user.user_id, run_id=run_id, dataset_name=dataset_name
+    )
+    return BaseResponseHandler.success_response(data=result, status_code=status_code)
+
+
+@data_router.get(
     "/research-runs/{run_id}/artifacts/{artifact_type}",
     dependencies=[Depends(security)],
 )

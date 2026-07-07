@@ -35,3 +35,9 @@ class ArtifactPaths:
     @property
     def decision(self) -> str:
         return f"{self.base}/decision.arrow.zstd"
+
+    def montecarlo_dataset(self, name: str) -> str:
+        """Chart datasets referenced by MonteCarloReport.charts[*].dataset —
+        crypalgos_core.montecarlo.reporting.build_montecarlo_report() writes
+        these as flat Arrow IPC files (not bundled in a workspace archive)."""
+        return f"{self.base}/datasets/montecarlo/{name}.arrow"

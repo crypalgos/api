@@ -13,6 +13,7 @@ class RunSummary(BaseModel):
     sharpe_ratio: Optional[float] = None
     sortino_ratio: Optional[float] = None
     calmar_ratio: Optional[float] = None
+    profit_factor: Optional[float] = None
     max_drawdown_pct: float = 0.0
     trade_count: int = 0
     win_rate: float = 0.0
@@ -37,7 +38,9 @@ class RunSummary(BaseModel):
         initial_capital: float,
         equity_preview: List[Any],
     ) -> "RunSummary":
-        g = raw_metrics.get("global", raw_metrics.get("global_metrics", raw_metrics))
+        g = raw_metrics.get("global") or raw_metrics.get("global_metrics") or raw_metrics
+        if not isinstance(g, dict):
+            g = {}
 
         total_trades = g.get("total_trades", g.get("trade_count", 0)) or 0
         net_profit = g.get("net_profit", 0.0) or 0.0
@@ -58,6 +61,7 @@ class RunSummary(BaseModel):
             sharpe_ratio=g.get("sharpe_ratio"),
             sortino_ratio=g.get("sortino_ratio"),
             calmar_ratio=g.get("calmar_ratio"),
+            profit_factor=g.get("profit_factor"),
             max_drawdown_pct=g.get("max_drawdown_pct", 0.0),
             trade_count=total_trades,
             win_rate=g.get("win_rate", 0.0),

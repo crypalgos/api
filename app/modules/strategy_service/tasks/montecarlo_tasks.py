@@ -71,6 +71,19 @@ async def _execute_montecarlo_internal(
                     backtest_report = backtest_payload
                 trades = backtest_report.get("trades", {}).get("recent_trades", [])
 
+            # The engine defaults to $10k if not told otherwise — but the
+            # source backtest may have run with a different initial_capital
+            # (stored in its metadata, meta_payload["initial_capital"] in
+            # backtest_tasks.py). Using the wrong baseline here would put the
+            # simulated fan and the real-equity overlay on different scales.
+            initial_capital = 10000.0
+            if backtest_run.metadata_s3_key:
+                try:
+                    backtest_meta = await storage_service.download_payload(backtest_run.metadata_s3_key)
+                    initial_capital = float(backtest_meta.get("initial_capital", initial_capital))
+                except Exception as e:
+                    logger.error(f"Failed to read initial_capital from backtest metadata, defaulting to $10k: {e}")
+
         mc_method = MonteCarloMethod(method)
         job = MonteCarloJob(
             simulation_count=simulation_count,
@@ -96,15 +109,70 @@ async def _execute_montecarlo_internal(
         class MockResearchResult:
             def __init__(self, trades):
                 self.trades = trades
+                # MonteCarloEngine.run() reads research_result.portfolio_trades
+                # (ADR-009 — Scenario Framework freeze; was .trade_pnls, a bare
+                # float list). The trades read back off the workspace archive
+                # already match PortfolioTradeRecord shape (CompletedTrade.to_dict()).
+                self.portfolio_trades = trades
 
         if not trades:
             raise ValueError("Source backtest has no valid trades to run Monte Carlo.")
 
         research_result = MockResearchResult(trades)
 
-        mc_engine = MonteCarloEngine()
+        paths = ArtifactPaths(strategy_id=strategy_id, run_id=run_id, kind="montecarlos")
+
+        mc_engine = MonteCarloEngine(initial_capital=initial_capital)
         result = mc_engine.run(job, research_result=research_result)
-        report = build_montecarlo_report(result)
+
+        # build_montecarlo_report writes the 4 chart datasets (sample_paths,
+        # percentile_bands, simulation_summary, distributions) to
+        # output_dir/datasets/montecarlo/*.arrow — without output_dir,
+        # report.charts[*].dataset would point at files that never exist.
+        # Write to a temp dir, then upload each to S3 at the same relative
+        # path so replay/dashboard reads resolve correctly.
+        import tempfile
+        import os
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            report = build_montecarlo_report(result, output_dir=tmp_dir)
+
+            # real_equity.arrow — the actual backtest's real equity/drawdown
+            # curve, for the bold "Real Strategy" overlay line. Lives here,
+            # not in crypalgos_core: the engine has no concept of "the one
+            # real run," only simulated pnl arrays. Same step-0-is-
+            # initial_capital convention as the engine's own equity_curves,
+            # so it's directly comparable on one chart.
+            import pyarrow as pa
+
+            real_equity: list[float] = [initial_capital]
+            real_drawdown: list[float] = [0.0]
+            running = initial_capital
+            running_max = initial_capital
+            for t in trades:
+                running += float(t.get("net_pnl", 0.0))
+                running_max = max(running_max, running)
+                real_equity.append(running)
+                real_drawdown.append((running_max - running) / max(running_max, 1e-6) * 100.0)
+            real_equity_table = pa.Table.from_pydict({
+                "step": list(range(len(real_equity))),
+                "equity": real_equity,
+                "drawdown": real_drawdown,
+            })
+            mc_datasets_dir = os.path.join(tmp_dir, "datasets", "montecarlo")
+            os.makedirs(mc_datasets_dir, exist_ok=True)
+            real_equity_path = os.path.join(mc_datasets_dir, "real_equity.arrow")
+            with pa.OSFile(real_equity_path, "wb") as f:
+                with pa.RecordBatchFileWriter(f, real_equity_table.schema) as writer:
+                    writer.write_table(real_equity_table)
+
+            if os.path.isdir(mc_datasets_dir):
+                for filename in os.listdir(mc_datasets_dir):
+                    dataset_name = filename.removesuffix(".arrow")
+                    with open(os.path.join(mc_datasets_dir, filename), "rb") as f:
+                        await storage_service.upload_raw_payload(
+                            paths.montecarlo_dataset(dataset_name), f.read()
+                        )
 
         # S3-First storage uploads
         meta_payload = {
@@ -127,7 +195,6 @@ async def _execute_montecarlo_internal(
 
         artifact_size = len(msgpack.packb(report_payload, use_bin_type=True))
 
-        paths = ArtifactPaths(strategy_id=strategy_id, run_id=run_id, kind="montecarlos")
         metadata_key = paths.metadata
         report_key = paths.report
 
