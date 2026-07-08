@@ -41,3 +41,12 @@ class ArtifactPaths:
         crypalgos_core.montecarlo.reporting.build_montecarlo_report() writes
         these as flat Arrow IPC files (not bundled in a workspace archive)."""
         return f"{self.base}/datasets/montecarlo/{name}.arrow"
+
+    def walkforward_dataset(self, name: str) -> str:
+        """Chart datasets referenced by WalkForwardReport.charts[*].dataset —
+        crypalgos_core.walkforward.reporting.build_walkforward_report() writes
+        these as flat Arrow IPC files: equity.arrow, rolling.arrow, and one
+        window_{id}_train.arrow / window_{id}_validation.arrow pair per
+        window (dynamic per-window names, not a small fixed set — see
+        data_service.py's pattern validation, not an exact-name allowlist)."""
+        return f"{self.base}/datasets/walkforward/{name}.arrow"

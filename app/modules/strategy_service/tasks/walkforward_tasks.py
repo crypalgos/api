@@ -15,7 +15,7 @@ from crypalgos_core.optimization import (
 from crypalgos_core.walkforward import (
     WalkForwardEngine,
     WalkForwardJob,
-    build_full_report,
+    build_walkforward_report,
     validate_walk_forward_job,
 )
 
@@ -135,7 +135,29 @@ async def _execute_walkforward_internal(
         finally:
             flusher.stop()
             await flusher_task
-        report = build_full_report(result)
+
+        paths = ArtifactPaths(strategy_id=strategy_id, run_id=run_id, kind="walkforwards")
+
+        # build_walkforward_report() (not build_full_report() — that returns a
+        # plain dict and was never the right function here; asdict() on it
+        # would always fail, and the frontend's WalkForwardReport type was
+        # already written against this richer dataclass's exact shape) also
+        # writes the per-window equity/rolling-metrics datasets to output_dir
+        # when given one — same tempfile+upload pattern as montecarlo_tasks.py.
+        import tempfile
+        import os
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            report = build_walkforward_report(result, job, output_dir=tmp_dir)
+
+            wf_datasets_dir = os.path.join(tmp_dir, "datasets", "walkforward")
+            if os.path.isdir(wf_datasets_dir):
+                for filename in os.listdir(wf_datasets_dir):
+                    dataset_name = filename.removesuffix(".arrow")
+                    with open(os.path.join(wf_datasets_dir, filename), "rb") as f:
+                        await storage_service.upload_raw_payload(
+                            paths.walkforward_dataset(dataset_name), f.read()
+                        )
 
         # S3-First storage uploads
         meta_payload = {
@@ -159,7 +181,6 @@ async def _execute_walkforward_internal(
 
         artifact_size = len(msgpack.packb(report_payload, use_bin_type=True))
 
-        paths = ArtifactPaths(strategy_id=strategy_id, run_id=run_id, kind="walkforwards")
         metadata_key = paths.metadata
         report_key = paths.report
 

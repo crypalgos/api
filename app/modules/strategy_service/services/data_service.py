@@ -1,4 +1,5 @@
 import logging
+import re
 from app.exceptions.exceptions import ResourceNotFoundException
 
 logger = logging.getLogger(__name__)
@@ -10,6 +11,14 @@ logger = logging.getLogger(__name__)
 _MONTECARLO_DATASET_NAMES = frozenset({
     "sample_paths", "percentile_bands", "simulation_summary", "distributions", "real_equity",
 })
+
+# Matches crypalgos_core.walkforward.reporting.build_walkforward_report()'s
+# output_dir/datasets/walkforward/*.arrow filenames — unlike Monte Carlo's
+# fixed dataset names, these are dynamic per-window (one train/validation
+# pair per window, window count varies per run), so this is a pattern
+# check rather than an exact-name allowlist — still rejects anything that
+# isn't one of the exact shapes this writer produces.
+_WALKFORWARD_DATASET_PATTERN = re.compile(r"^(equity|rolling|window_\d+_(train|validation))$")
 
 
 class DataServiceMixin:
@@ -96,6 +105,51 @@ class DataServiceMixin:
             raise
         except Exception as e:
             logger.error(f"Failed to download Monte Carlo dataset {dataset_name}: {e}")
+            raise ResourceNotFoundException(
+                "Dataset payload not found or failed to parse."
+            )
+
+    async def get_walkforward_dataset(
+        self, user_id: str, run_id: str, dataset_name: str
+    ) -> tuple[int, list]:
+        """Download one of the walk-forward chart datasets (equity, rolling,
+        or a per-window window_{id}_train/window_{id}_validation pair) —
+        standalone Arrow IPC files, not bundled inside a workspace.tar.zstd."""
+        from app.modules.strategy_service.utils.validators import (
+            validate_run_exists,
+            validate_strategy_exists,
+        )
+        from app.utils.artifact_paths import ArtifactPaths
+
+        if not _WALKFORWARD_DATASET_PATTERN.fullmatch(dataset_name):
+            raise ResourceNotFoundException(f"Unknown walk-forward dataset '{dataset_name}'.")
+
+        run = await self.run_repository.get_by_id(run_id)
+        validate_run_exists(run)
+
+        strategy = await self.strategy_repository.get_by_user_and_id(
+            user_id, run.strategy_id
+        )
+        validate_strategy_exists(strategy)
+
+        paths = ArtifactPaths(strategy_id=run.strategy_id, run_id=run_id, kind="walkforwards")
+        key = paths.walkforward_dataset(dataset_name)
+
+        try:
+            import io
+            import pyarrow as pa
+            from app.modules.strategy_service.services.storage_service import (
+                storage_service,
+            )
+
+            raw = await storage_service.download_raw_payload(key)
+            with pa.ipc.open_file(io.BytesIO(raw)) as reader:
+                table = reader.read_all()
+            return 200, table.to_pylist()
+        except ResourceNotFoundException:
+            raise
+        except Exception as e:
+            logger.error(f"Failed to download walk-forward dataset {dataset_name}: {e}")
             raise ResourceNotFoundException(
                 "Dataset payload not found or failed to parse."
             )
