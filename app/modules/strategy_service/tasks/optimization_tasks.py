@@ -176,12 +176,19 @@ async def _execute_optimization_internal(
             "objective": objective,
             "max_runs": max_runs,
         }
+        # OptimizationResult.equity_curve is never populated anywhere in
+        # crypalgos_core's optimization engine (always []) — don't ship a
+        # permanently-empty field in the report. Making this a real dataset
+        # is separate follow-up work that requires populating it first.
+        best_metrics_for_report = (
+            {k: v for k, v in best.metrics.items() if k != "equity_curve"} if best else {}
+        )
         report_payload = {
             "leaderboard": leaderboard,
             "best_result": (
                 {
                     "params": best.params,
-                    "metrics": best.metrics,
+                    "metrics": best_metrics_for_report,
                     "rank": best.rank,
                 }
                 if best
