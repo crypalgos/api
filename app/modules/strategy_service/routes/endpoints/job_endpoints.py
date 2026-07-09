@@ -190,6 +190,26 @@ async def get_backtest(
 
 
 @job_router.get(
+    "/strategies/{strategy_id}/optimizations/{run_id}",
+    dependencies=[Depends(security)],
+    responses={
+        200: {"model": SuccessResponseSchema[ResearchRunResponseSchema]},
+    },
+)
+async def get_optimization(
+    strategy_id: str,
+    run_id: str,
+    user: Annotated[CurrentUser, Depends(get_current_user)],
+    strategy_service: StrategyService = Depends(get_strategy_service),
+) -> JSONResponse:
+    """Fetch details of a single optimization run."""
+    status_code, result = await strategy_service.get_run(
+        user.user_id, strategy_id=strategy_id, run_id=run_id
+    )
+    return BaseResponseHandler.success_response(data=result, status_code=status_code)
+
+
+@job_router.get(
     "/strategies/{strategy_id}/optimizations",
     dependencies=[Depends(security)],
     responses={
@@ -216,6 +236,26 @@ async def list_optimizations(
         sort_by=sort_by,
         page=page,
         limit=limit,
+    )
+    return BaseResponseHandler.success_response(data=result, status_code=status_code)
+
+
+@job_router.get(
+    "/strategies/{strategy_id}/walkforwards/{run_id}",
+    dependencies=[Depends(security)],
+    responses={
+        200: {"model": SuccessResponseSchema[ResearchRunResponseSchema]},
+    },
+)
+async def get_walkforward(
+    strategy_id: str,
+    run_id: str,
+    user: Annotated[CurrentUser, Depends(get_current_user)],
+    strategy_service: StrategyService = Depends(get_strategy_service),
+) -> JSONResponse:
+    """Fetch details of a single walkforward run."""
+    status_code, result = await strategy_service.get_run(
+        user.user_id, strategy_id=strategy_id, run_id=run_id
     )
     return BaseResponseHandler.success_response(data=result, status_code=status_code)
 

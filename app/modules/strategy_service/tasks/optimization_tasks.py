@@ -14,6 +14,8 @@ from crypalgos_core.optimization import (
     OptimizationJob,
     ParameterDefinition,
     build_leaderboard,
+    compute_stability_region,
+    score_result,
     validate_opt_ir,
 )
 
@@ -160,6 +162,16 @@ async def _execute_optimization_internal(
             flusher.stop()
             await flusher_task
 
+        # A strategy that can't beat simply holding the underlying asset over
+        # the same period is a real, honest signal — surface it, don't hide it.
+        # Reuses the process-cached candle loader (same range the run itself
+        # already queried), so this costs no new ClickHouse round-trip.
+        from crypalgos_core.research.benchmark import compute_buy_and_hold_return_pct
+
+        benchmark_return_pct = await asyncio.to_thread(
+            compute_buy_and_hold_return_pct, strat_class, start_date, end_date
+        )
+
         leaderboard = build_leaderboard(opt_run.results, top_n=50)
         best = opt_run.results[0] if opt_run.results else None
 
@@ -183,6 +195,16 @@ async def _execute_optimization_internal(
         best_metrics_for_report = (
             {k: v for k, v in best.metrics.items() if k != "equity_curve"} if best else {}
         )
+        # Lightweight (params + objective score only, not the full 14-metric
+        # dict) so this stays bounded even at max_runs=5000 — raw material for
+        # the Parameter Heatmap and Stability Region, both of which need every
+        # tested combination, not just the top-50 leaderboard.
+        all_results = [
+            {"parameters": res.params, "objective_score": round(score_result(res, opt_ir), 6)}
+            for res in opt_run.results
+        ]
+        stability_region = compute_stability_region(opt_run.results, opt_ir)
+
         report_payload = {
             "leaderboard": leaderboard,
             "best_result": (
@@ -195,6 +217,14 @@ async def _execute_optimization_internal(
                 else None
             ),
             "total_runs": len(opt_run.results),
+            # Computed by OptimizationEngine.run() on every run but previously
+            # never read here — real signal about whether the winning result
+            # generalizes (a broad, low-variance sensitivity) or is a lucky spike.
+            "parameter_sensitivity": opt_run.parameter_sensitivity,
+            "optimization_health": opt_run.optimization_health,
+            "all_results": all_results,
+            "stability_region": stability_region,
+            "benchmark_return_pct": benchmark_return_pct,
         }
 
         # Measure size of S3 artifacts
@@ -213,12 +243,12 @@ async def _execute_optimization_internal(
         best_metrics = best.metrics if best else {}
         summary_json = {
             "net_profit": best_metrics.get("net_profit", 0.0),
-            "total_return_pct": best_metrics.get("total_return_pct", 0.0),
+            "total_return_pct": best_metrics.get("profit_pct", 0.0),
             "sharpe_ratio": best_metrics.get("sharpe_ratio"),
             "sortino_ratio": best_metrics.get("sortino_ratio"),
             "calmar_ratio": best_metrics.get("calmar_ratio"),
             "max_drawdown_pct": best_metrics.get("max_drawdown_pct", 0.0),
-            "trade_count": best_metrics.get("trade_count", 0),
+            "trade_count": best_metrics.get("total_trades", 0),
             "total_results": len(opt_run.results),
         }
 

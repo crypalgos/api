@@ -171,9 +171,20 @@ async def _execute_walkforward_internal(
         }
         from dataclasses import asdict
 
+        # A strategy that can't beat simply holding the underlying asset over
+        # the same period is a real, honest signal — surface it, don't hide it.
+        # Reuses the process-cached candle loader (same range the run itself
+        # already queried), so this costs no new ClickHouse round-trip.
+        from crypalgos_core.research.benchmark import compute_buy_and_hold_return_pct
+
+        benchmark_return_pct = await asyncio.to_thread(
+            compute_buy_and_hold_return_pct, strat_class, start_date, end_date
+        )
+
         report_payload = {
             "report": asdict(report),
             "windows_count": len(result.windows),
+            "benchmark_return_pct": benchmark_return_pct,
         }
 
         # Measure size of S3 artifacts
