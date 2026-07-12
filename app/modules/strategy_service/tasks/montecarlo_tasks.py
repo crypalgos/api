@@ -205,8 +205,17 @@ async def _execute_montecarlo_internal(
         summary_json = {
             "median_drawdown": float(report.summary.get("median_drawdown", 0.0)),
             "worst_drawdown": float(report.summary.get("worst_drawdown", 0.0)),
-            "probability_of_ruin": float(
-                report.summary.get("probability_of_ruin", 0.0)
+            # Two distinct ruin definitions — see crypalgos_core
+            # docs/ENGINE_AUDIT_REPORT.md finding #16. capital_ruin_probability
+            # (equity ever fell below a fixed floor off starting capital) and
+            # drawdown_ruin_probability (peak-to-trough drawdown breached the
+            # threshold) are genuinely different measures, not renames of the
+            # same number.
+            "capital_ruin_probability": float(
+                report.summary.get("capital_ruin_probability", 0.0)
+            ),
+            "drawdown_ruin_probability": float(
+                report.summary.get("drawdown_ruin_probability", 0.0)
             ),
         }
 
