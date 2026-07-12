@@ -822,7 +822,7 @@ wheels = [
 [[package]]
 name = "crypalgos-core"
 version = "3.0.0"
-source = { git = "https://github.com/crypalgos/crypalgos_core.git?branch=master#63e3b95ea43cc2fe3f17f250b3a121894b37f0c3" }
+source = { git = "https://github.com/crypalgos/crypalgos_core.git?branch=master#800a6973ac82f24076f0ecd40a8ad87eb1643123" }
 dependencies = [
     { name = "clickhouse-connect" },
     { name = "crypalgos-data" },
