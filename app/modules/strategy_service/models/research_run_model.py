@@ -31,6 +31,7 @@ class ResearchRun(Base):
         Index("idx_runs_strat_type_created", "strategy_id", "run_type", "created_at"),
         Index("idx_runs_status", "status"),
         Index("idx_runs_strat_fav", "strategy_id", "is_favorite"),
+        Index("idx_runs_strat_temp", "strategy_id", "is_temporary"),
     )
 
     id: Mapped[str] = mapped_column(
@@ -61,6 +62,10 @@ class ResearchRun(Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(String, nullable=True, default=None)
     is_favorite: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # Analyse-tab exploratory run: pinned to a hidden StrategyVersion snapshot,
+    # excluded from the default backtest list, and never promoted to
+    # StrategyLatestResults until explicitly saved (see save_run()).
+    is_temporary: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     status: Mapped[str] = mapped_column(String(32), default=JobStatus.PENDING, nullable=False)
     progress_percent: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     progress_json: Mapped[Dict[str, Any] | None] = mapped_column(JSON, nullable=True)

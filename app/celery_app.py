@@ -1,6 +1,7 @@
 import os
 
 from celery import Celery
+from celery.schedules import crontab
 
 # Redis endpoint defaults to localhost for host development, can be configured via environment
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
@@ -21,4 +22,10 @@ celery_app.conf.update(
     enable_utc=True,
     task_track_started=True,
     result_expires=3600,  # expire results in 1 hour
+    beat_schedule={
+        "cleanup-temporary-runs-daily": {
+            "task": "app.modules.strategy_service.tasks.cleanup_temporary_runs",
+            "schedule": crontab(hour=3, minute=0),  # 03:00 UTC daily
+        },
+    },
 )

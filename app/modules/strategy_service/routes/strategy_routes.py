@@ -29,6 +29,8 @@ from app.modules.strategy_service.schema.strategy_schema import (
     ResearchRunProgressResponseSchema,
     ResearchRunResponseSchema,
     ResearchRunTriggerResponseSchema,
+    SaveBacktestRequestSchema,
+    SaveBacktestResponseSchema,
     SaveCodeRequestSchema,
     SaveVersionRequestSchema,
     StrategyCreateSchema,
@@ -114,6 +116,26 @@ async def favorite_run(
     """Toggle favorite status of a run."""
     status_code, result = await strategy_service.toggle_run_favorite(
         user_id=user.user_id, run_id=run_id, is_favorite=data.is_favorite
+    )
+    return BaseResponseHandler.success_response(data=result, status_code=status_code)
+
+
+@strategy_router.post(
+    "/research-runs/{run_id}/save",
+    dependencies=[Depends(security)],
+    responses={
+        200: {"model": SuccessResponseSchema[SaveBacktestResponseSchema]},
+    },
+)
+async def save_run(
+    run_id: str,
+    data: SaveBacktestRequestSchema,
+    user: Annotated[CurrentUser, Depends(get_current_user)],
+    strategy_service: StrategyService = Depends(get_strategy_service),
+) -> JSONResponse:
+    """Promote a temporary Analyse-tab run into a permanent, saved backtest."""
+    status_code, result = await strategy_service.save_run(
+        user_id=user.user_id, run_id=run_id, commit_message=data.commit_message
     )
     return BaseResponseHandler.success_response(data=result, status_code=status_code)
 

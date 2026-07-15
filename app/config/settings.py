@@ -77,6 +77,9 @@ class Settings(BaseSettings):
     aws_access_key_id: str = ""
     aws_secret_access_key: str = ""
     aws_default_region: str = "us-east-1"
+    # Days an unpinned (is_favorite=False) Analyse-tab temporary run is kept
+    # before the daily cleanup task deletes it. Pinned runs are never touched.
+    temporary_run_retention_days: int = 30
 
     class Config:
         # computed once at import-time; can be overridden by setting ENV_FILE

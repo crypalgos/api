@@ -288,12 +288,16 @@ async def _execute_backtest_internal(
                     run.run_hash = run_hash
                     run.artifact_size_bytes = artifact_size
 
-                # Register/update latest backtest mapping
-                latest = await session.get(StrategyLatestResults, strategy_id)
-                if not latest:
-                    latest = StrategyLatestResults(strategy_id=strategy_id)
-                    session.add(latest)
-                latest.latest_backtest_id = backtest_id
+                # Register/update latest backtest mapping -- skip for
+                # Analyse-tab temporary runs, which must never hijack the
+                # dashboard's "latest backtest" preview (save_run() sets
+                # this explicitly once a temp run is promoted).
+                if run and not run.is_temporary:
+                    latest = await session.get(StrategyLatestResults, strategy_id)
+                    if not latest:
+                        latest = StrategyLatestResults(strategy_id=strategy_id)
+                        session.add(latest)
+                    latest.latest_backtest_id = backtest_id
 
         logger.info(
             f"Asynchronous Celery backtest run successfully completed and saved: {backtest_id}"

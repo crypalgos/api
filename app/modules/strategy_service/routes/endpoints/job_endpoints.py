@@ -46,6 +46,7 @@ async def trigger_backtest(
         start_date=data.start_date,
         end_date=data.end_date,
         initial_capital=data.initial_capital,
+        temporary=data.temporary,
     )
     return BaseResponseHandler.success_response(data=result, status_code=status_code)
 
@@ -150,6 +151,10 @@ async def list_backtests(
     user: Annotated[CurrentUser, Depends(get_current_user)],
     status: Optional[str] = None,
     is_favorite: Optional[bool] = None,
+    # Default False (not None) so this endpoint keeps excluding Analyse-tab
+    # temporary runs with zero frontend changes -- callers that want them
+    # pass is_temporary=true explicitly.
+    is_temporary: Optional[bool] = False,
     sort_by: str = "updated_at",
     page: int = 1,
     limit: int = 8,
@@ -162,6 +167,7 @@ async def list_backtests(
         run_type="BACKTEST",
         status=status,
         is_favorite=is_favorite,
+        is_temporary=is_temporary,
         sort_by=sort_by,
         page=page,
         limit=limit,
@@ -287,6 +293,26 @@ async def list_walkforwards(
         sort_by=sort_by,
         page=page,
         limit=limit,
+    )
+    return BaseResponseHandler.success_response(data=result, status_code=status_code)
+
+
+@job_router.get(
+    "/strategies/{strategy_id}/montecarlos/{run_id}",
+    dependencies=[Depends(security)],
+    responses={
+        200: {"model": SuccessResponseSchema[ResearchRunResponseSchema]},
+    },
+)
+async def get_montecarlo(
+    strategy_id: str,
+    run_id: str,
+    user: Annotated[CurrentUser, Depends(get_current_user)],
+    strategy_service: StrategyService = Depends(get_strategy_service),
+) -> JSONResponse:
+    """Fetch details of a single Monte Carlo run."""
+    status_code, result = await strategy_service.get_run(
+        user.user_id, strategy_id=strategy_id, run_id=run_id
     )
     return BaseResponseHandler.success_response(data=result, status_code=status_code)
 

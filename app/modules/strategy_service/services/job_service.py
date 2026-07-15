@@ -2,12 +2,19 @@ from datetime import datetime
 from app.modules.strategy_service.schema.strategy_schema import JobStatus, RunType
 from app.utils.time_utils import now_utc
 from typing import Any, Dict, List, Optional
-from app.exceptions.exceptions import ResourceNotFoundException
-from app.modules.strategy_service.models.research_run_model import ResearchRun
+from sqlalchemy import select
+from app.exceptions.exceptions import InvalidOperationException, ResourceNotFoundException
+from app.modules.strategy_service.models.research_run_model import (
+    ResearchRun,
+    StrategyLatestResults,
+)
+from app.modules.strategy_service.models.strategy_model import Strategy
+from app.modules.strategy_service.models.strategy_version_model import StrategyVersion
 from app.modules.strategy_service.schema.strategy_schema import (
     ResearchRunResponseSchema,
     ResearchRunProgressResponseSchema,
     PaginatedResearchRunsResponseSchema,
+    SaveBacktestResponseSchema,
     TemplateLibraryItemSchema,
 )
 from app.modules.strategy_service.services.storage_service import storage_service
@@ -22,8 +29,17 @@ class JobServiceMixin:
         end_date: datetime,
         initial_capital: float,
         parent_run_id: Optional[str] = None,
+        temporary: bool = False,
     ) -> tuple[int, dict]:
-        """Submit a single backtest job to the Celery worker."""
+        """Submit a single backtest job to the Celery worker.
+
+        temporary=True (Analyse-tab exploratory runs) pins the run to a
+        hidden StrategyVersion snapshot via _create_temporary_snapshot()
+        instead of _ensure_active_version() -- the strategy's real
+        current_version/has_unpublished_changes are never touched, and the
+        snapshot stays invisible to list_versions() until the run is
+        promoted via save_run().
+        """
         from app.modules.strategy_service.tasks import run_asynchronous_backtest_task
 
         strategy = await self.strategy_repository.get_by_user_and_id(
@@ -32,15 +48,19 @@ class JobServiceMixin:
         if not strategy or strategy.is_archived:
             raise ResourceNotFoundException("Strategy not found")
 
-        active_version = await self._ensure_active_version(strategy)
+        if temporary:
+            active_version = await self._create_temporary_snapshot(strategy)
+        else:
+            active_version = await self._ensure_active_version(strategy)
 
         run = ResearchRun(
             strategy_id=strategy_id,
             run_type=RunType.BACKTEST,
             strategy_version_id=active_version.id,
             compiled_hash=active_version.compiled_hash,
+            is_temporary=temporary,
             parent_run_id=parent_run_id,
-            name=f"Backtest {now_utc().strftime('%Y-%m-%d %H:%M')}",
+            name=f"{'Analyse Run' if temporary else 'Backtest'} {now_utc().strftime('%Y-%m-%d %H:%M')}",
             status=JobStatus.PENDING,
             progress_percent=0,
             summary_json={},
@@ -246,6 +266,7 @@ class JobServiceMixin:
         run_type: Optional[str] = None,
         status: Optional[str] = None,
         is_favorite: Optional[bool] = None,
+        is_temporary: Optional[bool] = None,
         sort_by: str = "updated_at",
         page: int = 1,
         limit: int = 8,
@@ -262,6 +283,7 @@ class JobServiceMixin:
             run_type=run_type,
             status=status,
             is_favorite=is_favorite,
+            is_temporary=is_temporary,
             sort_by=sort_by,
             page=page,
             limit=limit,
@@ -349,6 +371,102 @@ class JobServiceMixin:
 
         updated_run = await self.run_repository.update(run.id)
         return 200, ResearchRunResponseSchema.model_validate(updated_run)
+
+    async def save_run(
+        self, user_id: str, run_id: str, commit_message: Optional[str] = None
+    ) -> tuple[int, SaveBacktestResponseSchema]:
+        """Promote a temporary Analyse-tab run into a permanent, saved backtest.
+
+        Promotes the run's PINNED (temporary) StrategyVersion snapshot
+        rather than creating a fresh one from the live draft, so the run
+        always represents exactly what it executed regardless of edits
+        made since -- and version-bumps only if that snapshot's
+        compiled_hash differs from the strategy's currently committed
+        version (mirroring _ensure_active_version()'s own "no-op if
+        unchanged" semantics).
+        """
+        run = await self.run_repository.get_by_id(run_id)
+        if not run:
+            raise ResourceNotFoundException("Research run not found")
+
+        # Lock the parent strategy row for the duration of the promotion so
+        # two concurrent saves of the same run can't both read "no diff
+        # yet" and race each other into an inconsistent state.
+        strategy_stmt = (
+            select(Strategy)
+            .where(Strategy.id == run.strategy_id, Strategy.user_id == user_id)
+            .with_for_update()
+        )
+        strategy_res = await self.strategy_repository.session.execute(strategy_stmt)
+        strategy = strategy_res.scalar_one_or_none()
+        if not strategy or strategy.is_archived:
+            raise ResourceNotFoundException("Strategy not found")
+
+        if run.run_type != RunType.BACKTEST:
+            raise InvalidOperationException("Only backtest runs can be saved.")
+        if not run.is_temporary:
+            raise InvalidOperationException("This run is already saved.")
+        if run.status != JobStatus.COMPLETED:
+            raise InvalidOperationException("Only a completed run can be saved.")
+        if not run.strategy_version_id:
+            raise InvalidOperationException("This run has no snapshot to promote.")
+
+        snapshot_stmt = select(StrategyVersion).where(
+            StrategyVersion.id == run.strategy_version_id
+        )
+        snapshot_res = await self.strategy_repository.session.execute(snapshot_stmt)
+        snapshot = snapshot_res.scalar_one_or_none()
+        if not snapshot:
+            raise ResourceNotFoundException("Run's version snapshot not found")
+
+        committed_version = None
+        if strategy.current_version > 0:
+            committed_stmt = select(StrategyVersion).where(
+                StrategyVersion.strategy_id == strategy.id,
+                StrategyVersion.version == strategy.current_version,
+            )
+            committed_res = await self.strategy_repository.session.execute(committed_stmt)
+            committed_version = committed_res.scalar_one_or_none()
+
+        committed_hash = committed_version.compiled_hash if committed_version else None
+        created_new_version = snapshot.compiled_hash != committed_hash
+
+        if created_new_version:
+            snapshot.is_temporary = False
+            strategy.current_version = snapshot.version
+            strategy.updated_at = now_utc()
+            version_number = snapshot.version
+        else:
+            # Nothing changed since the strategy's current committed
+            # state -- link the run to that existing version instead and
+            # discard the now-redundant temp snapshot. Repoint the FK and
+            # flush BEFORE deleting, so StrategyVersion.research_runs'
+            # delete-orphan cascade has nothing left to cascade onto.
+            run.strategy_version_id = committed_version.id
+            run.compiled_hash = committed_version.compiled_hash
+            await self.strategy_repository.session.flush()
+            await self.strategy_repository.session.delete(snapshot)
+            version_number = committed_version.version
+
+        run.is_temporary = False
+        run.updated_at = now_utc()
+        if commit_message and not run.description:
+            run.description = commit_message
+
+        latest = await self.run_repository.get_latest_results(strategy.id)
+        if not latest:
+            latest = StrategyLatestResults(strategy_id=strategy.id)
+            self.strategy_repository.session.add(latest)
+        latest.latest_backtest_id = run.id
+
+        await self.strategy_repository.session.commit()
+        await self.strategy_repository.session.refresh(run)
+
+        return 200, SaveBacktestResponseSchema(
+            run=ResearchRunResponseSchema.model_validate(run),
+            created_new_version=created_new_version,
+            version_number=version_number,
+        )
 
     async def delete_run(self, user_id: str, run_id: str) -> tuple[int, dict]:
         """Permanently delete a run, its metadata, report, and dataset files."""

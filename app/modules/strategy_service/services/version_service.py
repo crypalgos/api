@@ -71,6 +71,45 @@ class VersionServiceMixin:
 
         return new_snapshot
 
+    async def _create_temporary_snapshot(self, strategy) -> StrategyVersion:
+        """Snapshot the live draft as a hidden version for an Analyse-tab run.
+
+        Unlike _ensure_active_version(), this always creates a new row (no
+        has_unpublished_changes reuse-check -- every temporary run pins its
+        own immutable snapshot) and never touches strategy.current_version /
+        has_unpublished_changes, so it stays invisible to the normal version
+        history (see list_versions()'s is_temporary filter) until promoted
+        by save_run().
+        """
+        if isinstance(strategy.compiled_code, str):
+            code_bytes = strategy.compiled_code.encode("utf-8")
+            current_hash = hashlib.sha256(code_bytes).hexdigest()
+        else:
+            current_hash = "mock_hash"
+        strategy.compiled_hash = current_hash
+
+        max_ver_stmt = select(func.max(StrategyVersion.version)).where(
+            StrategyVersion.strategy_id == strategy.id
+        )
+        max_ver_res = await self.strategy_repository.session.execute(max_ver_stmt)
+        max_ver = max_ver_res.scalar() or 0
+        new_version = max_ver + 1
+
+        snapshot = StrategyVersion(
+            strategy_id=strategy.id,
+            version=new_version,
+            commit_message="Analyse-tab exploratory run",
+            canvas_json=strategy.canvas_json,
+            source_code=strategy.source_code,
+            compiled_code=strategy.compiled_code,
+            compiled_hash=current_hash,
+            is_code_modified=strategy.is_code_modified,
+            is_temporary=True,
+        )
+        self.strategy_repository.session.add(snapshot)
+        await self.strategy_repository.session.flush()
+        return snapshot
+
     async def save_version(
         self, user_id: str, strategy_id: str, commit_message: str | None
     ) -> tuple[int, StrategyVersionResponseSchema]:
@@ -129,7 +168,10 @@ class VersionServiceMixin:
 
         stmt = (
             select(StrategyVersion)
-            .where(StrategyVersion.strategy_id == strategy_id)
+            .where(
+                StrategyVersion.strategy_id == strategy_id,
+                StrategyVersion.is_temporary == False,  # noqa: E712
+            )
             .order_by(StrategyVersion.version.desc())
         )
         res = await self.strategy_repository.session.execute(stmt)

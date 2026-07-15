@@ -49,6 +49,10 @@ class StrategyVersion(Base):
         String(32), default="DRAFT", nullable=False
     )
     is_golden: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # Hidden snapshot captured at Analyse-tab trigger time -- excluded from
+    # list_versions() and never counted as strategy.current_version until
+    # promoted by save_run().
+    is_temporary: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

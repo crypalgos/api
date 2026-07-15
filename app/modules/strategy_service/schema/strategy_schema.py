@@ -176,6 +176,9 @@ class BacktestTriggerRequestSchema(BaseModel):
     start_date: datetime
     end_date: datetime
     initial_capital: float = 10000.0
+    # Analyse-tab exploratory run: pinned to a hidden version snapshot,
+    # never bumps strategy.current_version until explicitly saved.
+    temporary: bool = False
 
 
 class ParameterDefinitionSchema(BaseModel):
@@ -242,6 +245,7 @@ class ResearchRunResponseSchema(BaseModel):
     name: str
     description: Optional[str] = None
     is_favorite: bool
+    is_temporary: bool = False
     status: str
     progress_percent: int
     report_version: Optional[str] = None
@@ -265,6 +269,16 @@ class ResearchRunTriggerResponseSchema(BaseModel):
     task_id: str
     status: str
     message: str
+
+
+class SaveBacktestRequestSchema(BaseModel):
+    commit_message: Optional[str] = None
+
+
+class SaveBacktestResponseSchema(BaseModel):
+    run: ResearchRunResponseSchema
+    created_new_version: bool
+    version_number: int
 
 
 class PaginatedResearchRunsResponseSchema(BaseModel):
