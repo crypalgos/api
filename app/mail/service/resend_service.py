@@ -114,6 +114,7 @@ class ResendEmailService:
                 params["reply_to"] = [reply_to]
 
             if tags:
+                # pyrefly: ignore [bad-assignment]
                 params["tags"] = tags
 
             # Send email
