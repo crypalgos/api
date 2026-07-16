@@ -1,427 +1,478 @@
-import importlib.util
+import hashlib
+from app.utils.time_utils import now_utc
 import logging
-import os
-import tempfile
-from datetime import datetime, timedelta
+from datetime import datetime
+from typing import Any, Dict, List, Optional
 
-import numpy as np
-
-# Quantitative library imports
-from crypalgos_core.compiler import compile_dag, DAGCompiler
-from crypalgos_core.simulator import EngineSimulator
-from crypalgos_core.strategy import StrategyBase
-
-# To support mock patching of DAGCompiler.compile_dag in service tests
-if not hasattr(DAGCompiler, "compile_dag"):
-    DAGCompiler.compile_dag = staticmethod(compile_dag)
+from crypalgos_core.compiler import DAGCompiler, compile_dag
 
 from app.exceptions.exceptions import ResourceNotFoundException
-from app.config.settings import settings
-from app.modules.strategy_service.models.backtest_model import Backtest
+from app.modules.strategy_service.models.research_run_model import (
+    ResearchRun,
+    StrategyLatestResults,
+)
 from app.modules.strategy_service.models.strategy_model import Strategy
-from app.modules.strategy_service.repositories.backtest_repository import (
-    BacktestRepository,
+from app.modules.strategy_service.repositories.research_run_repository import (
+    ResearchRunRepository,
 )
 from app.modules.strategy_service.repositories.strategy_repository import (
     StrategyRepository,
 )
-from typing import Any, Optional
 from app.modules.strategy_service.schema.strategy_schema import (
-    BacktestResponseSchema,
-    StrategyResponseSchema,
+    PaginatedResearchRunsResponseSchema,
     PaginatedStrategiesResponseSchema,
-    PaginatedBacktestsResponseSchema,
+    ResearchNoteResponseSchema,
+    ResearchRunProgressResponseSchema,
+    ResearchRunResponseSchema,
+    StrategyResponseSchema,
+    StrategyVersionResponseSchema,
+    TemplateLibraryItemSchema,
+    VersionDiffResponseSchema,
 )
+from app.modules.strategy_service.services.storage_service import storage_service
+from app.modules.strategy_service.services.job_service import JobServiceMixin
+from app.modules.strategy_service.services.version_service import VersionServiceMixin
+from app.modules.strategy_service.services.data_service import DataServiceMixin
+from app.modules.strategy_service.services.live_service import LiveServiceMixin
+
+if not hasattr(DAGCompiler, "compile_dag"):
+    DAGCompiler.compile_dag = staticmethod(compile_dag)
 
 logger = logging.getLogger(__name__)
 
-# Strategy service managing visual canvases and backtests
 
-class StrategyService:
+class StrategyService(
+    JobServiceMixin, LiveServiceMixin, VersionServiceMixin, DataServiceMixin
+):
     def __init__(
         self,
         strategy_repository: StrategyRepository,
-        backtest_repository: BacktestRepository
+        run_repository: Optional[ResearchRunRepository] = None,
     ):
         self.strategy_repository = strategy_repository
-        self.backtest_repository = backtest_repository
+        self.run_repository: ResearchRunRepository = run_repository  # type: ignore[assignment]
 
     async def create_strategy(
         self, user_id: str, name: str, description: str | None, canvas_json: dict
     ) -> tuple[int, StrategyResponseSchema]:
-        logger.info(f"Creating strategy '{name}' for user {user_id}")
-        
-        # Compile visual canvas to Python on-the-fly at create time
+        """Convert a user's visual pipeline configuration into executable python code."""
+        compiler = DAGCompiler()
+        compile_error = None
+        compile_diagnostics = None
         try:
-            compiled_code = DAGCompiler.compile_dag(canvas_json)
+            compiled_script = compiler.compile_dag(canvas_json)
+            compile_diagnostics = compiler.last_diagnostics
         except Exception as e:
-            logger.error(f"Canvas compilation failed: {e}")
-            compiled_code = "# Compilation failed during strategy creation.\n"
+            compile_error = str(e)
+            compile_diagnostics = getattr(e, "diagnostics", None)
+            if not compile_diagnostics:
+                compile_diagnostics = [
+                    {
+                        "node_id": None,
+                        "node_label": "Compiler",
+                        "severity": "ERROR",
+                        "error_code": "COMPILATION_ERROR",
+                        "message": compile_error,
+                        "suggestions": [],
+                    }
+                ]
+            compiled_script = f"# Compilation failed during strategy creation.\n# Error: {compile_error}\n"
 
         strategy = Strategy(
             user_id=user_id,
             name=name,
             description=description,
             canvas_json=canvas_json,
-            compiled_code=compiled_code,
-            is_code_modified=False
+            compiled_code=compiled_script,
+            is_code_modified=False,
+            is_template=False,
+            is_archived=False,
+            strategy_type="VISUAL",
+            source_code=None,
+            compiled_hash=(
+                hashlib.sha256(compiled_script.encode("utf-8")).hexdigest()
+                if isinstance(compiled_script, str)
+                else "mock_hash"
+            ),
+            current_version=0,
+            has_unpublished_changes=True,
         )
         created_strategy = await self.strategy_repository.create(strategy)
-        return 201, StrategyResponseSchema.model_validate(created_strategy)
+        response = StrategyResponseSchema.model_validate(created_strategy)
+        response.compile_error = compile_error
+        response.compile_diagnostics = compile_diagnostics
+        return 201, response
 
-    async def get_strategy(self, user_id: str, strategy_id: str) -> tuple[int, StrategyResponseSchema]:
-        strategy = await self.strategy_repository.get_by_id(strategy_id)
-        if not strategy or strategy.user_id != user_id:
+    async def save_custom_code(
+        self, user_id: str, strategy_id: str, code: str
+    ) -> tuple[int, StrategyResponseSchema]:
+        """Directly overwrite strategy python script inside Monaco editor."""
+        strategy = await self.strategy_repository.get_by_user_and_id(
+            user_id, strategy_id
+        )
+        if not strategy:
             raise ResourceNotFoundException("Strategy not found")
-        return 200, StrategyResponseSchema.model_validate(strategy)
+
+        strategy.compiled_code = code
+        strategy.source_code = code
+        strategy.is_code_modified = True
+        strategy.strategy_type = "CODE"
+        strategy.has_unpublished_changes = True
+        strategy.compiled_hash = (
+            hashlib.sha256(code.encode("utf-8")).hexdigest()
+            if isinstance(code, str)
+            else "mock_hash"
+        )
+        strategy.updated_at = now_utc()  # type: ignore[assignment]
+
+        updated_strategy = await self.strategy_repository.update(strategy.id)
+        return 200, StrategyResponseSchema.model_validate(updated_strategy)
+
+    save_strategy_code = save_custom_code
+
+    async def get_strategy(
+        self, user_id: str, strategy_id: str
+    ) -> tuple[int, StrategyResponseSchema]:
+        """Retrieve a specific visual strategy layout."""
+        from sqlalchemy import select
+        from sqlalchemy.orm import selectinload
+        from app.modules.strategy_service.models.research_run_model import (
+            StrategyLatestResults,
+        )
+
+        stmt = (
+            select(Strategy)
+            .where(Strategy.id == strategy_id, Strategy.user_id == user_id)
+            .options(
+                selectinload(Strategy.latest_results).selectinload(
+                    StrategyLatestResults.latest_backtest
+                )
+            )
+        )
+        res = await self.strategy_repository.session.execute(stmt)
+        strategy = res.scalar_one_or_none()
+
+        if not strategy or strategy.is_archived:
+            raise ResourceNotFoundException("Strategy not found")
+
+        resp = StrategyResponseSchema.model_validate(strategy)
+
+        # Populate counts for single strategy
+        from sqlalchemy import func
+
+        count_stmt = (
+            select(ResearchRun.run_type, func.count(ResearchRun.id))
+            .where(ResearchRun.strategy_id == strategy_id)
+            .group_by(ResearchRun.run_type)
+        )
+        count_res = await self.strategy_repository.session.execute(count_stmt)
+
+        counts = {
+            "backtests": 0,
+            "montecarlos": 0,
+            "walkforwards": 0,
+            "optimizations": 0,
+        }
+        for r_type, cnt in count_res:
+            type_key = f"{r_type.lower()}s"
+            # Map optimization -> optimizations
+            if type_key == "optimizations":
+                type_key = "optimizations"
+            elif type_key == "montecarlos":
+                type_key = "montecarlos"
+            elif type_key == "walkforwards":
+                type_key = "walkforwards"
+            elif type_key == "backtests":
+                type_key = "backtests"
+
+            if type_key in counts:
+                counts[type_key] = cnt
+        resp.research_counts = counts
+
+        # Populate is_golden
+        from app.modules.strategy_service.models.strategy_version_model import (
+            StrategyVersion,
+        )
+
+        golden_stmt = select(StrategyVersion.id).where(
+            StrategyVersion.strategy_id == strategy_id,
+            StrategyVersion.is_golden == True,
+        )
+        golden_res = await self.strategy_repository.session.execute(golden_stmt)
+        resp.is_golden = golden_res.scalar() is not None
+
+        # Populate latest_metrics and equity_preview
+        latest_backtest = (
+            strategy.latest_results.latest_backtest if strategy.latest_results else None
+        )
+        if latest_backtest and latest_backtest.summary_json:
+            sum_json = latest_backtest.summary_json
+            resp.latest_metrics = {
+                "return_pct": sum_json.get("total_return_pct", 0.0),
+                "sharpe": sum_json.get("sharpe_ratio"),
+                "drawdown": sum_json.get("max_drawdown_pct", 0.0),
+            }
+            resp.equity_preview = sum_json.get("equity_preview")
+        else:
+            resp.latest_metrics = None
+            resp.equity_preview = None
+
+        return 200, resp
 
     async def list_strategies(
-        self, user_id: str, page: int = 1, limit: int = 8, search: str = ""
+        self,
+        user_id: str,
+        page: int = 1,
+        limit: int = 8,
+        search: str = "",
+        is_template: Optional[bool] = None,
+        archived: bool = False,
     ) -> tuple[int, PaginatedStrategiesResponseSchema]:
+        """Retrieve paginated summary list of user strategies."""
         paginated_data = await self.strategy_repository.get_strategies_paginated(
-            user_id=user_id, page=page, limit=limit, search=search
+            user_id, page, limit, search, archived=archived
         )
-        paginated_data["strategies"] = [
-            StrategyResponseSchema.model_validate(s) for s in paginated_data["strategies"]
-        ]
+
+        # Filter templates if requested
+        items = paginated_data["strategies"]
+        if is_template is not None:
+            items = [s for s in items if s.is_template == is_template]
+
+        strategy_ids = [s.id for s in items]
+        research_counts_map = {}
+        golden_versions_map = {}
+
+        if strategy_ids:
+            from sqlalchemy import select, func
+
+            # Query counts
+            count_stmt = (
+                select(
+                    ResearchRun.strategy_id,
+                    ResearchRun.run_type,
+                    func.count(ResearchRun.id),
+                )
+                .where(ResearchRun.strategy_id.in_(strategy_ids))
+                .group_by(ResearchRun.strategy_id, ResearchRun.run_type)
+            )
+            count_res = await self.strategy_repository.session.execute(count_stmt)
+            for strat_id, r_type, cnt in count_res:
+                if strat_id not in research_counts_map:
+                    research_counts_map[strat_id] = {
+                        "backtests": 0,
+                        "montecarlos": 0,
+                        "walkforwards": 0,
+                        "optimizations": 0,
+                    }
+
+                type_key = f"{r_type.lower()}s"  # BACKTEST -> backtests
+                if type_key == "optimizations":
+                    type_key = "optimizations"
+                elif type_key == "montecarlos":
+                    type_key = "montecarlos"
+                elif type_key == "walkforwards":
+                    type_key = "walkforwards"
+                elif type_key == "backtests":
+                    type_key = "backtests"
+
+                if type_key in research_counts_map[strat_id]:
+                    research_counts_map[strat_id][type_key] = cnt
+
+            # Check golden versions
+            from app.modules.strategy_service.models.strategy_version_model import (
+                StrategyVersion,
+            )
+
+            golden_stmt = select(StrategyVersion.strategy_id).where(
+                StrategyVersion.strategy_id.in_(strategy_ids),
+                StrategyVersion.is_golden == True,
+            )
+            golden_res = await self.strategy_repository.session.execute(golden_stmt)
+            for row in golden_res:
+                golden_versions_map[row[0]] = True
+
+        response_strategies = []
+        for s in items:
+            resp = StrategyResponseSchema.model_validate(s)
+
+            # Set is_golden
+            resp.is_golden = golden_versions_map.get(s.id, False)
+
+            # Set research_counts
+            resp.research_counts = research_counts_map.get(
+                s.id,
+                {
+                    "backtests": 0,
+                    "montecarlos": 0,
+                    "walkforwards": 0,
+                    "optimizations": 0,
+                },
+            )
+
+            # Set latest_metrics & equity_preview
+            latest_backtest = (
+                s.latest_results.latest_backtest if s.latest_results else None
+            )
+            if latest_backtest and latest_backtest.summary_json:
+                sum_json = latest_backtest.summary_json
+                resp.latest_metrics = {
+                    "return_pct": sum_json.get("total_return_pct", 0.0),
+                    "sharpe": sum_json.get("sharpe_ratio"),
+                    "drawdown": sum_json.get("max_drawdown_pct", 0.0),
+                }
+                resp.equity_preview = sum_json.get("equity_preview")
+            else:
+                resp.latest_metrics = None
+                resp.equity_preview = None
+
+            response_strategies.append(resp)
+
+        paginated_data["strategies"] = response_strategies
+        paginated_data["total"] = len(response_strategies)
         return 200, PaginatedStrategiesResponseSchema.model_validate(paginated_data)
 
-    async def save_custom_code(self, user_id: str, strategy_id: str, code: str) -> tuple[int, dict]:
-        strategy = await self.strategy_repository.get_by_id(strategy_id)
-        if not strategy or strategy.user_id != user_id:
-            raise ResourceNotFoundException("Strategy not found")
-            
-        await self.strategy_repository.update(strategy_id, compiled_code=code, is_code_modified=True)
-        return 200, {"success": True, "message": "Custom Monaco code saved successfully. Visual flow desynchronized."}
-
     async def update_canvas(
-        self, user_id: str, strategy_id: str, canvas_json: dict,
-        name: str | None = None, description: str | None = None
+        self,
+        user_id: str,
+        strategy_id: str,
+        canvas_json: dict,
+        name: str | None = None,
+        description: str | None = None,
     ) -> tuple[int, StrategyResponseSchema]:
-        """Save canvas node/edge JSON and recompile to Python. Resets code_modified flag."""
-        strategy = await self.strategy_repository.get_by_id(strategy_id)
-        if not strategy or strategy.user_id != user_id:
-            raise ResourceNotFoundException("Strategy not found")
-
-        # Recompile from the updated canvas
-        try:
-            compiled_code = DAGCompiler.compile_dag(canvas_json)
-        except Exception as e:
-            logger.error(f"Canvas recompilation failed for strategy {strategy_id}: {e}")
-            # Keep existing code but still save the canvas layout
-            compiled_code = strategy.compiled_code
-
-        update_kwargs: dict = dict(
-            canvas_json=canvas_json,
-            compiled_code=compiled_code,
-            is_code_modified=False,
+        """Save visual canvas node/edge graph and recompile to Python strategy code."""
+        strategy = await self.strategy_repository.get_by_user_and_id(
+            user_id, strategy_id
         )
-        if name is not None:
-            update_kwargs["name"] = name
-        if description is not None:
-            update_kwargs["description"] = description
-
-        updated = await self.strategy_repository.update(strategy_id, **update_kwargs)
-        return 200, StrategyResponseSchema.model_validate(updated)
-
-
-    async def reset_to_visual_builder(self, user_id: str, strategy_id: str) -> tuple[int, StrategyResponseSchema]:
-        strategy = await self.strategy_repository.get_by_id(strategy_id)
-        if not strategy or strategy.user_id != user_id:
+        if not strategy or strategy.is_archived:
             raise ResourceNotFoundException("Strategy not found")
-            
+
+        compiler = DAGCompiler()
+        compile_error = None
+        compile_diagnostics = None
         try:
-            pristine_code = DAGCompiler.compile_dag(strategy.canvas_json)
+            compiled_script = compiler.compile_dag(canvas_json)
+            compile_diagnostics = compiler.last_diagnostics
         except Exception as e:
-            raise ValueError(f"Failed to reset and compile visual builder nodes: {e}")
-            
-        updated = await self.strategy_repository.update(
-            strategy_id, 
-            compiled_code=pristine_code, 
-            is_code_modified=False
-        )
-        return 200, StrategyResponseSchema.model_validate(updated)
-
-    async def run_backtest(
-        self, user_id: str, strategy_id: str, exchange: str, symbol: str,
-        start_date: datetime, end_date: datetime, initial_capital: float, leverage: int
-    ) -> tuple[int, BacktestResponseSchema]:
-        # Normalize symbol and exchange
-        symbol = symbol.replace("/", "").replace("-", "").upper()
-        exchange = exchange.strip().lower()
-
-        strategy = await self.strategy_repository.get_by_id(strategy_id)
-        if not strategy or strategy.user_id != user_id:
-            raise ResourceNotFoundException("Strategy not found")
-
-        # Resolve correct active compiled script
-        if strategy.is_code_modified:
+            compile_error = str(e)
+            compile_diagnostics = getattr(e, "diagnostics", None)
+            if not compile_diagnostics:
+                compile_diagnostics = [
+                    {
+                        "node_id": None,
+                        "node_label": "Compiler",
+                        "severity": "ERROR",
+                        "error_code": "COMPILATION_ERROR",
+                        "message": compile_error,
+                        "suggestions": [],
+                    }
+                ]
             compiled_script = strategy.compiled_code
-        else:
-            try:
-                compiled_script = DAGCompiler.compile_dag(strategy.canvas_json)
-                await self.strategy_repository.update(strategy_id, compiled_code=compiled_script)
-            except Exception as e:
-                raise ValueError(f"On-the-fly backtest compilation failed: {e}")
 
-        # Write to temporary file for dynamic import
-        with tempfile.NamedTemporaryFile(suffix=".py", mode="w", delete=False) as tf:
-            tf.write(compiled_script)
-            temp_path = tf.name
+        strategy.canvas_json = canvas_json
+        strategy.compiled_code = compiled_script
+        strategy.is_code_modified = False
+        strategy.strategy_type = "VISUAL"
+        strategy.has_unpublished_changes = True
+        strategy.compiled_hash = (
+            hashlib.sha256(compiled_script.encode("utf-8")).hexdigest()
+            if isinstance(compiled_script, str)
+            else "mock_hash"
+        )
+        strategy.updated_at = now_utc()  # type: ignore[assignment]
+        if name is not None:
+            strategy.name = name
+        if description is not None:
+            strategy.description = description
 
-        try:
-            # Dynamic Load
-            spec = importlib.util.spec_from_file_location(f"backtest_run_{strategy_id}", temp_path)
-            if not spec or not spec.loader:
-                raise ValueError("Failed to resolve package module specifications or loader.")
-            module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(module)
+        updated_strategy = await self.strategy_repository.update(strategy.id)
+        response = StrategyResponseSchema.model_validate(updated_strategy)
+        response.compile_error = compile_error
+        response.compile_diagnostics = compile_diagnostics
+        return 200, response
 
-            strat_class = None
-            for name in dir(module):
-                obj = getattr(module, name)
-                if isinstance(obj, type) and issubclass(obj, StrategyBase) and obj is not StrategyBase:
-                    strat_class = obj
-                    break
-
-            if not strat_class:
-                raise ValueError("No compiled StrategyBase subclass found in strategy script.")
-
-            # Run offline / online simulator
-            simulator = EngineSimulator(
-                initial_capital=initial_capital,
-                leverage=leverage,
-                slippage_rate=0.0002,
-                maker_fee_rate=0.0002,
-                taker_fee_rate=0.0004
-            )
-
-            report = simulator.run(
-                strategy_class=strat_class,
-                exchange=exchange.lower(),
-                symbol=symbol.upper(),
-                start_date=start_date,
-                end_date=end_date
-            )
-
-            # Construct charting metrics mapping
-            metrics = {
-                "net_profit": report.get("net_profit", 0.0),
-                "profit_pct": (report.get("net_profit", 0.0) / initial_capital) * 100.0,
-                "total_trades": len(report.get("trades", [])),
-                "win_rate": report.get("win_rate", 0.0),
-                "profit_factor": report.get("profit_factor", 0.0),
-                "sharpe_ratio": report.get("sharpe_ratio", 0.0),
-                "max_drawdown": report.get("max_drawdown", 0.0),
-                "final_balance": report.get("final_balance", initial_capital)
-            }
-
-            # Sampling charting timeline arrays to maximum 1,000 points
-            raw_equity = report.get("equity_curve", [])
-            raw_drawdown = report.get("drawdown_curve", [])
-            
-            def downsample(timeline: list, target: int = 1000) -> list:
-                n = len(timeline)
-                if n <= target:
-                    return timeline
-                step = n // target
-                return [timeline[i] for i in range(0, n, step)] + [timeline[-1]]
-
-            charting = {
-                "trades": report.get("trades", []),
-                "equity_curve": downsample(raw_equity),
-                "drawdown_curve": downsample(raw_drawdown)
-            }
-
-            # Create backtest entry
-            backtest = Backtest(
-                strategy_id=strategy_id,
-                exchange=exchange,
-                symbol=symbol,
-                start_date=start_date,
-                end_date=end_date,
-                initial_capital=initial_capital,
-                leverage=leverage,
-                metrics_json=metrics,
-                charting_json=charting
-            )
-
-            created_backtest = await self.backtest_repository.create(backtest)
-            return 201, BacktestResponseSchema.model_validate(created_backtest)
-
-        finally:
-            # Clean up temp file safely
-            if os.path.exists(temp_path):
-                os.remove(temp_path)
-
-    async def trigger_backtest(
-        self, user_id: str, strategy_id: str,
-        start_date: datetime, end_date: datetime, initial_capital: float,
-    ) -> tuple[int, dict]:
-        strategy = await self.strategy_repository.get_by_id(strategy_id)
-        if not strategy or strategy.user_id != user_id:
+    async def reset_to_visual_builder(
+        self, user_id: str, strategy_id: str
+    ) -> tuple[int, StrategyResponseSchema]:
+        """Reset custom code edits by recompiling from the saved Visual Canvas graph."""
+        strategy = await self.strategy_repository.get_by_user_and_id(
+            user_id, strategy_id
+        )
+        if not strategy or strategy.is_archived:
             raise ResourceNotFoundException("Strategy not found")
 
-        # Resolve exchange, symbol, and leverage from canvas_json nodes
-        canvas_json = strategy.canvas_json or {}
-        nodes = canvas_json.get("nodes", [])
-        data_node = next((n for n in nodes if n.get("type") == "dataNode"), None)
-        start_node = next((n for n in nodes if n.get("type") == "startNode"), None)
+        compiler = DAGCompiler()
+        compiled_script = compiler.compile_dag(strategy.canvas_json)
 
-        if not data_node:
-            raise ValueError(
-                "Strategy has no Data Node configured. "
-                "Add and configure a Data Node (symbol) before running a backtest."
-            )
-        if not start_node:
-            raise ValueError("Strategy has no Start Node configured.")
-
-        data_node_data = data_node.get("data", {})
-        start_node_data = start_node.get("data", {})
-
-        exchange = start_node_data.get("exchange") or "delta"
-        symbol = data_node_data.get("symbol")
-        leverage = start_node_data.get("leverage")
-
-        if not symbol:
-            raise ValueError("Data Node is missing 'symbol'. Open the Data Node and select an instrument.")
-
-        # Resolve leverage — default to 1 if not set (conservative)
-        if leverage is None:
-            leverage = 1
-        if isinstance(leverage, str):
-            try:
-                leverage = int(leverage.lower().replace("x", "").strip())
-            except (ValueError, TypeError):
-                leverage = 1
-        else:
-            leverage = int(leverage)
-
-        # Normalize symbol and exchange for backend use
-        symbol = symbol.replace("/", "").replace("-", "").upper()
-        exchange = exchange.strip().lower()
-
-        # Validate date range
-        if start_date >= end_date:
-            raise ValueError("start_date must be before end_date.")
-
-        # Resolve correct active compiled script and persist it
-        if not strategy.is_code_modified:
-            try:
-                compiled_script = DAGCompiler.compile_dag(strategy.canvas_json)
-                await self.strategy_repository.update(strategy_id, compiled_code=compiled_script)
-            except Exception as e:
-                raise ValueError(f"On-the-fly backtest compilation failed: {e}")
-
-        # ── Execution routing ──────────────────────────────────────────────────
-        # LOCAL DEV  : SANDBOX_ENABLED=false → run in-process immediately
-        # PRODUCTION : SANDBOX_ENABLED=true  → enqueue to Celery/Valkey worker
-        # ──────────────────────────────────────────────────────────────────────
-        if not settings.sandbox_enabled:
-            # Run synchronously in the FastAPI process — results in DB immediately
-            logger.info(f"[DEV] Running backtest in-process (sandbox disabled) for {strategy_id}")
-            status_code, backtest = await self.run_backtest(
-                user_id=user_id,
-                strategy_id=strategy_id,
-                exchange=exchange,
-                symbol=symbol,
-                start_date=start_date,
-                end_date=end_date,
-                initial_capital=initial_capital,
-                leverage=leverage
-            )
-            return 200, {
-                "status": "completed",
-                "task_id": backtest.id,
-                "message": "Backtest completed and results saved.",
-            }
-
-        # Import task inside method to prevent any potential circular dependencies
-        from app.modules.strategy_service.tasks import run_asynchronous_backtest_task
-
-        # Enqueue the Celery background task
-        task = run_asynchronous_backtest_task.delay(
-            strategy_id=strategy_id,
-            exchange=exchange,
-            symbol=symbol,
-            start_date_iso=start_date.isoformat(),
-            end_date_iso=end_date.isoformat(),
-            initial_capital=initial_capital,
-            leverage=leverage
+        strategy.compiled_code = compiled_script
+        strategy.is_code_modified = False
+        strategy.strategy_type = "VISUAL"
+        strategy.has_unpublished_changes = True
+        strategy.compiled_hash = (
+            hashlib.sha256(compiled_script.encode("utf-8")).hexdigest()
+            if isinstance(compiled_script, str)
+            else "mock_hash"
         )
+        strategy.updated_at = now_utc()  # type: ignore[assignment]
 
-        return 202, {
-            "status": "enqueued",
-            "task_id": task.id,
-            "message": "Backtest enqueued successfully."
-        }
+        updated_strategy = await self.strategy_repository.update(strategy.id)
+        return 200, StrategyResponseSchema.model_validate(updated_strategy)
 
     async def delete_strategy(self, user_id: str, strategy_id: str) -> tuple[int, dict]:
-        """Permanently remove a strategy owned by the given user."""
-        strategy = await self.strategy_repository.get_by_user_and_id(user_id, strategy_id)
-        if not strategy:
-            raise ResourceNotFoundException("Strategy not found")
-        await self.strategy_repository.delete(strategy_id)
-        return 200, {"success": True, "message": "Strategy deleted successfully."}
-
-    async def list_backtests(
-        self, user_id: str, strategy_id: str, page: int = 1, limit: int = 8,
-        exchange: str | None = None, symbol: str | None = None
-    ) -> tuple[int, PaginatedBacktestsResponseSchema]:
-        """Return a paginated, filtered list of backtest runs for a strategy owned by user_id."""
-        strategy = await self.strategy_repository.get_by_user_and_id(user_id, strategy_id)
-        if not strategy:
-            raise ResourceNotFoundException("Strategy not found")
-        
-        paginated_data = await self.backtest_repository.get_backtests_paginated(
-            strategy_id=strategy_id, page=page, limit=limit, exchange=exchange, symbol=symbol
+        """Soft delete if active, or permanently hard delete (cleaning S3/DB) if already archived."""
+        strategy = await self.strategy_repository.get_by_user_and_id(
+            user_id, strategy_id
         )
-        
-        backtests_schemas = []
-        for bt in paginated_data["backtests"]:
-            schema = BacktestResponseSchema.model_validate(bt)
-            # Strip heavy charting data from paginated list responses
-            if isinstance(schema.charting_json, dict):
-                if "equity_curve" in schema.charting_json:
-                    schema.charting_json["equity_curve"] = []
-                if "drawdown_curve" in schema.charting_json:
-                    schema.charting_json["drawdown_curve"] = []
-                if "trades" in schema.charting_json:
-                    schema.charting_json["trades"] = []
-            # Truncate massive error strings in metrics to prevent frontend hang
-            if isinstance(schema.metrics_json, dict) and "error" in schema.metrics_json:
-                err = schema.metrics_json["error"]
-                if isinstance(err, str) and len(err) > 300:
-                    schema.metrics_json["error"] = err[:300] + "... (truncated)"
-            backtests_schemas.append(schema)
-
-        paginated_data["backtests"] = backtests_schemas
-        return 200, PaginatedBacktestsResponseSchema.model_validate(paginated_data)
-
-    async def get_backtest(
-        self, user_id: str, strategy_id: str, backtest_id: str
-    ) -> tuple[int, BacktestResponseSchema]:
-        """Fetch a specific backtest run with curves intact after verifying user strategy ownership."""
-        strategy = await self.strategy_repository.get_by_user_and_id(user_id, strategy_id)
         if not strategy:
             raise ResourceNotFoundException("Strategy not found")
 
-        backtest = await self.backtest_repository.get_by_id(backtest_id)
-        if not backtest or backtest.strategy_id != strategy_id:
-            raise ResourceNotFoundException("Backtest run not found")
+        if strategy.is_archived:
+            from sqlalchemy import delete
 
-        return 200, BacktestResponseSchema.model_validate(backtest)
+            # 1. Clean up S3 prefix / files
+            await storage_service.delete_directory(f"reports/{strategy_id}")
 
-    async def delete_backtest(self, user_id: str, strategy_id: str, backtest_id: str) -> tuple[int, dict]:
-        """Permanently delete a specific backtest run after verifying user strategy ownership."""
-        strategy = await self.strategy_repository.get_by_user_and_id(user_id, strategy_id)
+            # 2. Delete associated research runs from database
+            await self.strategy_repository.session.execute(
+                delete(ResearchRun).where(ResearchRun.strategy_id == strategy_id)
+            )
+
+            # 3. Delete latest results mapping
+            await self.strategy_repository.session.execute(
+                delete(StrategyLatestResults).where(
+                    StrategyLatestResults.strategy_id == strategy_id
+                )
+            )
+
+            # 4. Hard delete the strategy row
+            await self.strategy_repository.session.execute(
+                delete(Strategy).where(Strategy.id == strategy_id)
+            )
+            await self.strategy_repository.session.commit()
+
+            return 200, {
+                "success": True,
+                "message": "Strategy and all associated history permanently deleted.",
+            }
+
+        strategy.is_archived = True
+        strategy.updated_at = now_utc()  # type: ignore[assignment]
+        await self.strategy_repository.update(strategy.id)
+        return 200, {"success": True, "message": "Strategy archived successfully."}
+
+    async def restore_strategy(
+        self, user_id: str, strategy_id: str
+    ) -> tuple[int, dict]:
+        """Restore/unarchive a strategy from soft delete."""
+        strategy = await self.strategy_repository.get_by_user_and_id(
+            user_id, strategy_id
+        )
         if not strategy:
             raise ResourceNotFoundException("Strategy not found")
-            
-        backtest = await self.backtest_repository.get_by_id(backtest_id)
-        if not backtest or backtest.strategy_id != strategy_id:
-            raise ResourceNotFoundException("Backtest run not found")
-            
-        await self.backtest_repository.delete(backtest_id)
-        return 200, {"success": True, "message": "Backtest run deleted successfully."}
 
+        if not strategy.is_archived:
+            return 200, StrategyResponseSchema.model_validate(strategy).model_dump()
+
+        strategy.is_archived = False
+        strategy.updated_at = now_utc()  # type: ignore[assignment]
+        updated_strategy = await self.strategy_repository.update(strategy.id)
+        return 200, StrategyResponseSchema.model_validate(updated_strategy).model_dump()

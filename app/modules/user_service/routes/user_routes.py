@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.advices.base_response_handler import BaseResponseHandler
 from app.advices.responses import ErrorResponseSchema, SuccessResponseSchema
 from app.db.connect_db import get_db
-from app.middlewares.auth_middleware import get_current_user
+from app.middlewares.auth_middleware import CurrentUser, get_current_user
 
 from ..repositories.user_repository import UserRepository
 from ..schema.user_schema import GenericMessageSchema, UserSchema, UserUpdateSchema
@@ -49,7 +49,7 @@ async def get_user_service(session: AsyncSession = Depends(get_db)) -> UserServi
     },
 )
 async def get_my_profile(
-    current_user: dict = Depends(get_current_user),
+    current_user: CurrentUser = Depends(get_current_user),
     user_service: UserService = Depends(get_user_service),
 ) -> JSONResponse:
     """
@@ -58,7 +58,7 @@ async def get_my_profile(
     :param user_service: The UserService instance to handle user operations.
     :return: JSONResponse with the status code and result.
     """
-    current_user_id = current_user["user_id"]
+    current_user_id = current_user.user_id
     status_code, result = await user_service.get_user_profile(current_user_id)
     return BaseResponseHandler.success_response(data=result, status_code=status_code)
 
@@ -83,7 +83,7 @@ async def get_my_profile(
 )
 async def update_current_user(
     update_data: UserUpdateSchema,
-    current_user: dict = Depends(get_current_user),
+    current_user: CurrentUser = Depends(get_current_user),
     user_service: UserService = Depends(get_user_service),
 ) -> JSONResponse:
     """
@@ -93,7 +93,7 @@ async def update_current_user(
     :param user_service: The UserService instance to handle user operations.
     :return: JSONResponse with the status code and result.
     """
-    current_user_id = current_user["user_id"]
+    current_user_id = current_user.user_id
     status_code, result = await user_service.update_user_profile(
         current_user_id, **update_data.model_dump(exclude_unset=True)
     )
@@ -119,7 +119,7 @@ async def update_current_user(
     },
 )
 async def delete_current_user(
-    current_user: dict = Depends(get_current_user),
+    current_user: CurrentUser = Depends(get_current_user),
     user_service: UserService = Depends(get_user_service),
 ) -> JSONResponse:
     """
@@ -128,6 +128,6 @@ async def delete_current_user(
     :param user_service: The UserService instance to handle user operations.
     :return: JSONResponse with the status code and result.
     """
-    current_user_id = current_user["user_id"]
+    current_user_id = current_user.user_id
     status_code, result = await user_service.delete_user_account(current_user_id)
     return BaseResponseHandler.success_response(data=result, status_code=status_code)

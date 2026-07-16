@@ -4,7 +4,9 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.modules.strategy_service.models.strategy_model import Strategy
-from app.modules.strategy_service.repositories.strategy_repository import StrategyRepository
+from app.modules.strategy_service.repositories.strategy_repository import (
+    StrategyRepository,
+)
 
 
 @pytest.fixture
@@ -14,10 +16,14 @@ def strategy_repo(mock_db_session: AsyncMock) -> StrategyRepository:
 
 
 @pytest.mark.asyncio
-async def test_get_by_user_id(strategy_repo: StrategyRepository, mock_db_session: AsyncMock) -> None:
+async def test_get_by_user_id(
+    strategy_repo: StrategyRepository, mock_db_session: AsyncMock
+) -> None:
     """Test retrieving strategies by user ID."""
     mock_strategies = [MagicMock(spec=Strategy), MagicMock(spec=Strategy)]
-    mock_db_session.execute.return_value.scalars.return_value.all.return_value = mock_strategies
+    mock_db_session.execute.return_value.scalars.return_value.all.return_value = (
+        mock_strategies
+    )
 
     result = await strategy_repo.get_by_user_id("user-123")
 
@@ -27,9 +33,17 @@ async def test_get_by_user_id(strategy_repo: StrategyRepository, mock_db_session
 
 
 @pytest.mark.asyncio
-async def test_create_strategy(strategy_repo: StrategyRepository, mock_db_session: AsyncMock) -> None:
+async def test_create_strategy(
+    strategy_repo: StrategyRepository, mock_db_session: AsyncMock
+) -> None:
     """Test creating a strategy."""
-    strat = Strategy(id="strat-123", user_id="user-123", name="Test Strat", canvas_json={}, compiled_code="")
+    strat = Strategy(
+        id="strat-123",
+        user_id="user-123",
+        name="Test Strat",
+        canvas_json={},
+        compiled_code="",
+    )
     mock_db_session.refresh = AsyncMock()
 
     result = await strategy_repo.create(strat)
@@ -41,7 +55,9 @@ async def test_create_strategy(strategy_repo: StrategyRepository, mock_db_sessio
 
 
 @pytest.mark.asyncio
-async def test_get_by_id(strategy_repo: StrategyRepository, mock_db_session: AsyncMock) -> None:
+async def test_get_by_id(
+    strategy_repo: StrategyRepository, mock_db_session: AsyncMock
+) -> None:
     """Test fetching strategy by ID."""
     strat = Strategy(id="strat-123")
     mock_db_session.get.return_value = strat
@@ -53,7 +69,9 @@ async def test_get_by_id(strategy_repo: StrategyRepository, mock_db_session: Asy
 
 
 @pytest.mark.asyncio
-async def test_update_strategy(strategy_repo: StrategyRepository, mock_db_session: AsyncMock) -> None:
+async def test_update_strategy(
+    strategy_repo: StrategyRepository, mock_db_session: AsyncMock
+) -> None:
     """Test updating strategy attributes."""
     strat = Strategy(id="strat-123", name="Old Name")
     mock_db_session.get.return_value = strat
@@ -66,7 +84,9 @@ async def test_update_strategy(strategy_repo: StrategyRepository, mock_db_sessio
 
 
 @pytest.mark.asyncio
-async def test_delete_strategy_success(strategy_repo: StrategyRepository, mock_db_session: AsyncMock) -> None:
+async def test_delete_strategy_success(
+    strategy_repo: StrategyRepository, mock_db_session: AsyncMock
+) -> None:
     """Test deleting strategy successfully."""
     strat = Strategy(id="strat-123")
     mock_db_session.get.return_value = strat
@@ -79,7 +99,9 @@ async def test_delete_strategy_success(strategy_repo: StrategyRepository, mock_d
 
 
 @pytest.mark.asyncio
-async def test_delete_strategy_not_found(strategy_repo: StrategyRepository, mock_db_session: AsyncMock) -> None:
+async def test_delete_strategy_not_found(
+    strategy_repo: StrategyRepository, mock_db_session: AsyncMock
+) -> None:
     """Test deleting non-existent strategy returns False."""
     mock_db_session.get.return_value = None
 

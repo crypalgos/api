@@ -1,11 +1,14 @@
 import abc
 import asyncio
-import logging
-import websockets
 import json
+import logging
+
+import websockets
+
 from ..services.broker import ZMQBroker
 
 logger = logging.getLogger(__name__)
+
 
 class BaseExchangeClient(abc.ABC):
     def __init__(self, broker: ZMQBroker, exchange_name: str, ws_url: str):
@@ -34,7 +37,7 @@ class BaseExchangeClient(abc.ABC):
                     self.ws = websocket
                     await self.ws.send(json.dumps(self.get_subscription_payload()))
                     logger.info(f"Subscribed to {self.exchange_name} channels")
-                    
+
                     async for message in websocket:
                         data = json.loads(message)
                         updates = self.normalize_message(data)
@@ -44,11 +47,11 @@ class BaseExchangeClient(abc.ABC):
                                 updates = [("trades", updates)]
                             elif isinstance(updates, tuple):
                                 updates = [updates]
-                            
+
                             for topic_suffix, normalized_data in updates:
                                 await self.broker.publish(
                                     topic=f"{topic_suffix}.{self.exchange_name}",
-                                    data=json.dumps(normalized_data)
+                                    data=json.dumps(normalized_data),
                                 )
             except Exception as e:
                 logger.error(f"Error in {self.exchange_name} connection: {e}")

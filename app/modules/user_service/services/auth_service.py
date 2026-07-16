@@ -1,8 +1,8 @@
 import logging
 import uuid
-import aiohttp
-from google.oauth2 import id_token
+
 from google.auth.transport import requests as google_requests
+from google.oauth2 import id_token
 
 from app.config.settings import settings
 from app.exceptions.exceptions import (
@@ -196,9 +196,7 @@ class AuthService:
             client_id = settings.google_client_id if settings.google_client_id else None
             # verify_oauth2_token verifies signature, audience, issuer, and expiration time
             payload = id_token.verify_oauth2_token(
-                token, 
-                google_requests.Request(), 
-                audience=client_id
+                token, google_requests.Request(), audience=client_id
             )
         except ValueError as e:
             raise InvalidCredentialsException(f"Invalid Google token: {str(e)}")
@@ -260,9 +258,7 @@ class AuthService:
                     user_email=user.email, user_name=user.name
                 )
             except Exception as e:
-                logger.error(
-                    f"Failed to send welcome email to {user.email}: {str(e)}"
-                )
+                logger.error(f"Failed to send welcome email to {user.email}: {str(e)}")
 
         # Create access and refresh tokens + session
         access_token, refresh_token, expires_in = await self._create_user_session(

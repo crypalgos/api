@@ -1,8 +1,11 @@
-from fastapi import FastAPI
-from .services.streamer import streamer_manager
 import logging
 
+from fastapi import FastAPI
+
+from .services.streamer import streamer_manager
+
 logger = logging.getLogger(__name__)
+
 
 def setup_data_service(app: FastAPI):
     @app.on_event("startup")

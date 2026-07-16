@@ -429,7 +429,9 @@ class TestAuthServiceGoogle:
     """Tests for user login via Google OAuth."""
 
     @pytest.mark.asyncio
-    @patch("app.modules.user_service.services.auth_service.id_token.verify_oauth2_token")
+    @patch(
+        "app.modules.user_service.services.auth_service.id_token.verify_oauth2_token"
+    )
     async def test_login_google_existing_user_success(
         self,
         mock_verify,
@@ -466,7 +468,9 @@ class TestAuthServiceGoogle:
                 refresh_token,
                 expires_in,
                 user,
-            ) = await auth_service.login_google_user(google_data, "Mozilla/5.0", "127.0.0.1")
+            ) = await auth_service.login_google_user(
+                google_data, "Mozilla/5.0", "127.0.0.1"
+            )
 
         # Assert
         assert status_code == 200
@@ -476,7 +480,9 @@ class TestAuthServiceGoogle:
         mock_user_repository.get_by_email.assert_called_once_with(sample_user.email)
 
     @pytest.mark.asyncio
-    @patch("app.modules.user_service.services.auth_service.id_token.verify_oauth2_token")
+    @patch(
+        "app.modules.user_service.services.auth_service.id_token.verify_oauth2_token"
+    )
     async def test_login_google_new_user_success(
         self,
         mock_verify,
@@ -529,7 +535,9 @@ class TestAuthServiceGoogle:
                 refresh_token,
                 expires_in,
                 user,
-            ) = await auth_service.login_google_user(google_data, "Mozilla/5.0", "127.0.0.1")
+            ) = await auth_service.login_google_user(
+                google_data, "Mozilla/5.0", "127.0.0.1"
+            )
 
         # Assert
         assert status_code == 200
@@ -540,7 +548,9 @@ class TestAuthServiceGoogle:
         mock_user_repository.create_user.assert_called_once()
 
     @pytest.mark.asyncio
-    @patch("app.modules.user_service.services.auth_service.id_token.verify_oauth2_token")
+    @patch(
+        "app.modules.user_service.services.auth_service.id_token.verify_oauth2_token"
+    )
     async def test_login_google_invalid_token(
         self,
         mock_verify,
@@ -553,6 +563,8 @@ class TestAuthServiceGoogle:
 
         # Act & Assert
         with pytest.raises(InvalidCredentialsException) as exc_info:
-            await auth_service.login_google_user(google_data, "Mozilla/5.0", "127.0.0.1")
+            await auth_service.login_google_user(
+                google_data, "Mozilla/5.0", "127.0.0.1"
+            )
 
         assert "Invalid Google token" in str(exc_info.value)

@@ -1,0 +1,317 @@
+import asyncio
+from app.modules.strategy_service.schema.strategy_schema import JobStatus, RunType
+from app.utils.artifact_paths import ArtifactPaths
+from app.utils.time_utils import now_utc
+import logging
+from datetime import datetime
+from typing import Any
+
+from crypalgos_core.optimization import (
+    Constraint,
+    Objective,
+    OptimizationEngine,
+    OptimizationIR,
+    OptimizationJob,
+    ParameterDefinition,
+    build_leaderboard,
+    compute_stability_region,
+    score_result,
+    validate_opt_ir,
+)
+
+from app.celery_app import celery_app
+from app.db.connect_db import AsyncSessionLocal
+from app.modules.strategy_service.models.research_run_model import (
+    ResearchRun,
+    StrategyLatestResults,
+)
+from app.modules.strategy_service.services.storage_service import storage_service
+from app.modules.strategy_service.tasks.task_utils import (
+    AsyncProgressFlusher,
+    job_lifecycle_context,
+    load_and_compile_strategy,
+)
+
+logger = logging.getLogger(__name__)
+
+
+async def _execute_optimization_internal(
+    run_id: str,
+    strategy_id: str,
+    start_date: datetime,
+    end_date: datetime,
+    initial_capital: float,
+    parameter_space_json: list,
+    constraints_json: list,
+    objective: str,
+    search_type: str,
+    max_runs: int,
+    strategy_version_id: str | None = None,
+) -> dict[str, Any]:
+    async with job_lifecycle_context(run_id, "Optimization task"):
+        # Load and compile strategy
+        async with AsyncSessionLocal() as session:
+            strat_class = await load_and_compile_strategy(
+                strategy_id, session, strategy_version_id=strategy_version_id
+            )
+
+        # Compute run hash for caching
+        import hashlib
+        import json
+
+        hash_payload = {
+            "strategy_version_id": strategy_version_id,
+            "start_date": start_date.isoformat(),
+            "end_date": end_date.isoformat(),
+            "initial_capital": initial_capital,
+            "parameter_space": parameter_space_json,
+            "constraints": constraints_json,
+            "objective": objective,
+            "search_type": search_type,
+            "max_runs": max_runs,
+        }
+        hash_str = json.dumps(hash_payload, sort_keys=True)
+        run_hash = hashlib.sha256(hash_str.encode("utf-8")).hexdigest()
+
+        async with AsyncSessionLocal() as session:
+            from sqlalchemy import select
+
+            dup_stmt = (
+                select(ResearchRun)
+                .where(
+                    ResearchRun.strategy_id == strategy_id,
+                    ResearchRun.run_hash == run_hash,
+                    ResearchRun.status == JobStatus.COMPLETED,
+                )
+                .order_by(ResearchRun.completed_at.desc())
+                .limit(1)
+            )
+            dup_res = await session.execute(dup_stmt)
+            duplicate_run = dup_res.scalar_one_or_none()
+
+            if duplicate_run:
+                logger.info(
+                    f"Reusing duplicate completed optimization run {duplicate_run.id} for hash {run_hash}"
+                )
+                async with session.begin():
+                    run = await session.get(ResearchRun, run_id)
+                    if run:
+                        run.status=JobStatus.COMPLETED
+                        run.completed_at = now_utc()
+                        run.progress_percent = 100
+                        run.metadata_s3_key = duplicate_run.metadata_s3_key
+                        run.report_s3_key = duplicate_run.report_s3_key
+                        run.summary_json = duplicate_run.summary_json
+                        run.run_hash = run_hash
+                        run.artifact_size_bytes = duplicate_run.artifact_size_bytes
+
+                    latest = await session.get(StrategyLatestResults, strategy_id)
+                    if not latest:
+                        latest = StrategyLatestResults(strategy_id=strategy_id)
+                        session.add(latest)
+                    latest.latest_optimization_id = run_id
+                return {
+                    "success": True,
+                    "run_id": run_id,
+                    "total_results": (
+                        duplicate_run.summary_json.get("total_results", 0)
+                        if duplicate_run.summary_json
+                        else 0
+                    ),
+                }
+
+        # Build OptimizationIR
+        params = [ParameterDefinition(**p) for p in parameter_space_json]
+        constraints = [Constraint(**c) for c in (constraints_json or [])]
+        opt_ir = OptimizationIR(
+            parameters=params,
+            constraints=constraints,
+            objectives=[Objective(metric=objective, target="max")],
+            search_type=search_type,
+            max_iterations=max_runs,
+        )
+        validate_opt_ir(opt_ir)
+
+        # Build Job
+        job = OptimizationJob(
+            strategy_class=strat_class,
+            start_date=start_date,
+            end_date=end_date,
+            exchange=getattr(strat_class, "exchange", "delta"),
+            symbol=next(iter(getattr(strat_class, "datasources", {}).values()), {}).get(
+                "symbol", "BTCUSD"
+            ),  # type: ignore[call-overload]
+            opt_ir=opt_ir,
+            initial_capital=initial_capital,
+            leverage=next(
+                iter(getattr(strat_class, "datasources", {}).values()), {}
+            ).get(
+                "leverage", 1
+            ),  # type: ignore[call-overload]
+        )
+
+        # Setup progress flusher
+        flusher = AsyncProgressFlusher(run_id, RunType.OPTIMIZATION)
+        flusher_task = asyncio.create_task(flusher.start_polling())
+
+        # Run Engine in background thread
+        engine_opt = OptimizationEngine()
+        try:
+            opt_run = await asyncio.to_thread(engine_opt.run, job, flusher.update)
+        finally:
+            flusher.stop()
+            await flusher_task
+
+        # A strategy that can't beat simply holding the underlying asset over
+        # the same period is a real, honest signal — surface it, don't hide it.
+        # Reuses the process-cached candle loader (same range the run itself
+        # already queried), so this costs no new ClickHouse round-trip.
+        from crypalgos_core.research.benchmark import compute_buy_and_hold_return_pct
+
+        benchmark_return_pct = await asyncio.to_thread(
+            compute_buy_and_hold_return_pct, strat_class, start_date, end_date
+        )
+
+        leaderboard = build_leaderboard(opt_run.results, top_n=50)
+        best = opt_run.results[0] if opt_run.results else None
+
+        # Build storage payloads
+        meta_payload = {
+            "strategy_id": strategy_id,
+            "run_id": run_id,
+            "start_date": start_date.isoformat(),
+            "end_date": end_date.isoformat(),
+            "initial_capital": initial_capital,
+            "parameter_space": parameter_space_json,
+            "constraints": constraints_json,
+            "search_type": search_type,
+            "objective": objective,
+            "max_runs": max_runs,
+        }
+        # OptimizationResult.equity_curve is never populated anywhere in
+        # crypalgos_core's optimization engine (always []) — don't ship a
+        # permanently-empty field in the report. Making this a real dataset
+        # is separate follow-up work that requires populating it first.
+        best_metrics_for_report = (
+            {k: v for k, v in best.metrics.items() if k != "equity_curve"} if best else {}
+        )
+        # Lightweight (params + objective score only, not the full 14-metric
+        # dict) so this stays bounded even at max_runs=5000 — raw material for
+        # the Parameter Heatmap and Stability Region, both of which need every
+        # tested combination, not just the top-50 leaderboard.
+        all_results = [
+            {"parameters": res.params, "objective_score": round(score_result(res, opt_ir), 6)}
+            for res in opt_run.results
+        ]
+        stability_region = compute_stability_region(opt_run.results, opt_ir)
+
+        report_payload = {
+            "leaderboard": leaderboard,
+            "best_result": (
+                {
+                    "params": best.params,
+                    "metrics": best_metrics_for_report,
+                    "rank": best.rank,
+                }
+                if best
+                else None
+            ),
+            "total_runs": len(opt_run.results),
+            # Computed by OptimizationEngine.run() on every run but previously
+            # never read here — real signal about whether the winning result
+            # generalizes (a broad, low-variance sensitivity) or is a lucky spike.
+            "parameter_sensitivity": opt_run.parameter_sensitivity,
+            "optimization_health": opt_run.optimization_health,
+            "all_results": all_results,
+            "stability_region": stability_region,
+            "benchmark_return_pct": benchmark_return_pct,
+        }
+
+        # Measure size of S3 artifacts
+        import msgpack
+
+        artifact_size = len(msgpack.packb(report_payload, use_bin_type=True))
+
+        paths = ArtifactPaths(strategy_id=strategy_id, run_id=run_id, kind="optimization")
+        metadata_key = paths.metadata
+        report_key = paths.report
+
+        await storage_service.upload_payload(metadata_key, meta_payload)
+        await storage_service.upload_payload(report_key, report_payload)
+
+        # Build database summary (take primary objectives from the best result if it exists)
+        best_metrics = best.metrics if best else {}
+        summary_json = {
+            "net_profit": best_metrics.get("net_profit", 0.0),
+            "total_return_pct": best_metrics.get("profit_pct", 0.0),
+            "sharpe_ratio": best_metrics.get("sharpe_ratio"),
+            "sortino_ratio": best_metrics.get("sortino_ratio"),
+            "calmar_ratio": best_metrics.get("calmar_ratio"),
+            "max_drawdown_pct": best_metrics.get("max_drawdown_pct", 0.0),
+            "trade_count": best_metrics.get("total_trades", 0),
+            "total_results": len(opt_run.results),
+        }
+
+        # Update DB
+        async with AsyncSessionLocal() as session:
+            async with session.begin():
+                run = await session.get(ResearchRun, run_id)
+                if run:
+                    run.status=JobStatus.COMPLETED
+                    run.completed_at = now_utc()
+                    run.progress_percent = 100
+                    run.metadata_s3_key = metadata_key
+                    run.report_s3_key = report_key
+                    run.summary_json = summary_json
+                    run.run_hash = run_hash
+                    run.artifact_size_bytes = artifact_size
+
+                # Register latest optimization mapping
+                latest = await session.get(StrategyLatestResults, strategy_id)
+                if not latest:
+                    latest = StrategyLatestResults(strategy_id=strategy_id)
+                    session.add(latest)
+                latest.latest_optimization_id = run_id
+
+        logger.info(
+            f"Optimization run {run_id} completed with {len(opt_run.results)} results."
+        )
+        return {
+            "success": True,
+            "run_id": run_id,
+            "total_results": len(opt_run.results),
+        }
+
+
+@celery_app.task(name="app.modules.strategy_service.tasks.run_optimization_task")
+def run_optimization_task(
+    run_id: str,
+    strategy_id: str,
+    start_date_iso: str,
+    end_date_iso: str,
+    initial_capital: float,
+    parameter_space_json: list,
+    constraints_json: list,
+    objective: str,
+    search_type: str,
+    max_runs: int,
+    strategy_version_id: str | None = None,
+) -> dict[str, Any]:
+    """Celery background task for parameter optimization using grid or random search."""
+    start_date = datetime.fromisoformat(start_date_iso)
+    end_date = datetime.fromisoformat(end_date_iso)
+    return asyncio.run(
+        _execute_optimization_internal(
+            run_id=run_id,
+            strategy_id=strategy_id,
+            start_date=start_date,
+            end_date=end_date,
+            initial_capital=initial_capital,
+            parameter_space_json=parameter_space_json,
+            constraints_json=constraints_json,
+            objective=objective,
+            search_type=search_type,
+            max_runs=max_runs,
+            strategy_version_id=strategy_version_id,
+        )
+    )

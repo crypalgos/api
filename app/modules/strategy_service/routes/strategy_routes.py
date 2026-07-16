@@ -1,337 +1,270 @@
 import logging
-from typing import Annotated
+from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
+from fastapi.security import HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.advices.base_response_handler import BaseResponseHandler
 from app.advices.responses import ErrorResponseSchema, SuccessResponseSchema
 from app.db.connect_db import get_db
-from app.middlewares.auth_middleware import get_current_user
-from app.modules.strategy_service.repositories.backtest_repository import (
-    BacktestRepository,
+from app.middlewares.auth_middleware import CurrentUser, get_current_user
+from app.modules.strategy_service.repositories.research_run_repository import (
+    ResearchRunRepository,
 )
-
-# Service & Repository imports
 from app.modules.strategy_service.repositories.strategy_repository import (
     StrategyRepository,
 )
 from app.modules.strategy_service.schema.strategy_schema import (
-    BacktestResponseSchema,
     BacktestTriggerRequestSchema,
+    EditResearchRunRequestSchema,
+    FavoriteResearchRunRequestSchema,
+    MonteCarloRequestSchema,
+    OptimizationRequestSchema,
+    PaginatedResearchRunsResponseSchema,
+    PaginatedStrategiesResponseSchema,
+    ResearchNoteCreateSchema,
+    ResearchNoteResponseSchema,
+    ResearchRunProgressResponseSchema,
+    ResearchRunResponseSchema,
+    ResearchRunTriggerResponseSchema,
+    SaveBacktestRequestSchema,
+    SaveBacktestResponseSchema,
     SaveCodeRequestSchema,
-    UpdateCanvasRequestSchema,
+    SaveVersionRequestSchema,
     StrategyCreateSchema,
     StrategyResponseSchema,
-    BacktestTriggerResponseSchema,
-    PaginatedStrategiesResponseSchema,
-    PaginatedBacktestsResponseSchema,
+    StrategyVersionResponseSchema,
+    TemplateLibraryItemSchema,
+    UpdateCanvasRequestSchema,
+    UpdateVersionApprovalRequestSchema,
+    UpdateVersionLabelRequestSchema,
+    VersionDiffResponseSchema,
+    WalkForwardRequestSchema,
 )
 from app.modules.strategy_service.services.strategy_service import StrategyService
-from app.modules.strategy_service.tasks import run_asynchronous_backtest_task
 
 logger = logging.getLogger(__name__)
 
-strategy_router = APIRouter(prefix="/strategies", tags=["Strategies"])
+security = HTTPBearer()
+strategy_router = APIRouter(tags=["Strategies"])
 
-async def get_strategy_service(session: AsyncSession = Depends(get_db)) -> StrategyService:
-    strat_repo = StrategyRepository(session)
-    bt_repo = BacktestRepository(session)
-    return StrategyService(strat_repo, bt_repo)
+
+async def get_strategy_service(
+    session: AsyncSession = Depends(get_db),
+) -> StrategyService:
+    return StrategyService(StrategyRepository(session), ResearchRunRepository(session))
+
+
+from app.modules.strategy_service.routes.endpoints.core_endpoints import core_router
+from app.modules.strategy_service.routes.endpoints.version_endpoints import (
+    version_router,
+)
+from app.modules.strategy_service.routes.endpoints.job_endpoints import job_router
+from app.modules.strategy_service.routes.endpoints.data_endpoints import data_router
+from app.modules.strategy_service.routes.endpoints.live_endpoints import live_router
+
+strategy_router.include_router(core_router)
+strategy_router.include_router(version_router)
+strategy_router.include_router(job_router)
+strategy_router.include_router(data_router)
+strategy_router.include_router(live_router)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# General Run Operations (Rename, Favorites, Delete, Progress, Latest, Charting)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@strategy_router.patch(
+    "/research-runs/{run_id}",
+    dependencies=[Depends(security)],
+    responses={
+        200: {"model": SuccessResponseSchema[ResearchRunResponseSchema]},
+    },
+)
+async def rename_run(
+    run_id: str,
+    data: EditResearchRunRequestSchema,
+    user: Annotated[CurrentUser, Depends(get_current_user)],
+    strategy_service: StrategyService = Depends(get_strategy_service),
+) -> JSONResponse:
+    """Edit a run's name and/or description."""
+    status_code, result = await strategy_service.edit_run(
+        user_id=user.user_id,
+        run_id=run_id,
+        name=data.name,
+        description=data.description,
+    )
+    return BaseResponseHandler.success_response(data=result, status_code=status_code)
+
+
+@strategy_router.patch(
+    "/research-runs/{run_id}/favorite",
+    dependencies=[Depends(security)],
+    responses={
+        200: {"model": SuccessResponseSchema[ResearchRunResponseSchema]},
+    },
+)
+async def favorite_run(
+    run_id: str,
+    data: FavoriteResearchRunRequestSchema,
+    user: Annotated[CurrentUser, Depends(get_current_user)],
+    strategy_service: StrategyService = Depends(get_strategy_service),
+) -> JSONResponse:
+    """Toggle favorite status of a run."""
+    status_code, result = await strategy_service.toggle_run_favorite(
+        user_id=user.user_id, run_id=run_id, is_favorite=data.is_favorite
+    )
+    return BaseResponseHandler.success_response(data=result, status_code=status_code)
+
 
 @strategy_router.post(
-    "",
+    "/research-runs/{run_id}/save",
+    dependencies=[Depends(security)],
     responses={
-        201: {
-            "model": SuccessResponseSchema[StrategyResponseSchema],
-            "description": "Visual strategy canvas successfully created",
-        },
-        422: {
-            "model": ErrorResponseSchema,
-            "description": "Validation error for the canvas payload",
-        },
+        200: {"model": SuccessResponseSchema[SaveBacktestResponseSchema]},
     },
 )
-async def create_strategy(
-    strategy_data: StrategyCreateSchema,
-    user: Annotated[dict, Depends(get_current_user)],
-    strategy_service: StrategyService = Depends(get_strategy_service)
+async def save_run(
+    run_id: str,
+    data: SaveBacktestRequestSchema,
+    user: Annotated[CurrentUser, Depends(get_current_user)],
+    strategy_service: StrategyService = Depends(get_strategy_service),
 ) -> JSONResponse:
-    """Create a new visual React Flow strategy canvas, auto-generating standard code base."""
-    status_code, result = await strategy_service.create_strategy(
-        user_id=user["user_id"],
-        name=strategy_data.name,
-        description=strategy_data.description,
-        canvas_json=strategy_data.canvas_json
+    """Promote a temporary Analyse-tab run into a permanent, saved backtest."""
+    status_code, result = await strategy_service.save_run(
+        user_id=user.user_id, run_id=run_id, commit_message=data.commit_message
     )
     return BaseResponseHandler.success_response(data=result, status_code=status_code)
 
-@strategy_router.get(
-    "",
-    responses={
-        200: {
-            "model": SuccessResponseSchema[PaginatedStrategiesResponseSchema],
-            "description": "Successfully listed paginated strategies belonging to the user",
-        },
-    },
-)
-async def list_strategies(
-    user: Annotated[dict, Depends(get_current_user)],
-    page: int = 1,
-    limit: int = 8,
-    search: str = "",
-    strategy_service: StrategyService = Depends(get_strategy_service)
-) -> JSONResponse:
-    """List saved strategies belonging to the authenticated user with pagination and search."""
-    status_code, result = await strategy_service.list_strategies(
-        user_id=user["user_id"],
-        page=page,
-        limit=limit,
-        search=search
-    )
-    return BaseResponseHandler.success_response(data=result, status_code=status_code)
-
-@strategy_router.get(
-    "/{strategy_id}",
-    responses={
-        200: {
-            "model": SuccessResponseSchema[StrategyResponseSchema],
-            "description": "Successfully retrieved target strategy",
-        },
-        404: {
-            "model": ErrorResponseSchema,
-            "description": "Strategy not found",
-        },
-    },
-)
-async def get_strategy(
-    strategy_id: str,
-    user: Annotated[dict, Depends(get_current_user)],
-    strategy_service: StrategyService = Depends(get_strategy_service)
-) -> JSONResponse:
-    """Fetch a specific visual strategy canvas."""
-    status_code, result = await strategy_service.get_strategy(user["user_id"], strategy_id)
-    return BaseResponseHandler.success_response(data=result, status_code=status_code)
-
-@strategy_router.put(
-    "/{strategy_id}/code",
-    responses={
-        200: {
-            "model": SuccessResponseSchema[dict],
-            "description": "Successfully saved Monaco code modification, visual flow desynchronized",
-        },
-        404: {
-            "model": ErrorResponseSchema,
-            "description": "Strategy not found",
-        },
-    },
-)
-async def save_monaco_code(
-    strategy_id: str,
-    code_data: SaveCodeRequestSchema,
-    user: Annotated[dict, Depends(get_current_user)],
-    strategy_service: StrategyService = Depends(get_strategy_service)
-) -> JSONResponse:
-    """Overwrite standard compiled code with custom user edits inside Monaco editor."""
-    status_code, result = await strategy_service.save_custom_code(
-        user_id=user["user_id"],
-        strategy_id=strategy_id,
-        code=code_data.code
-    )
-    return BaseResponseHandler.success_response(data=result, status_code=status_code)
-
-@strategy_router.put(
-    "/{strategy_id}/canvas",
-    responses={
-        200: {
-            "model": SuccessResponseSchema[StrategyResponseSchema],
-            "description": "Canvas saved and recompiled to Python successfully",
-        },
-        404: {
-            "model": ErrorResponseSchema,
-            "description": "Strategy not found",
-        },
-    },
-)
-async def update_canvas(
-    strategy_id: str,
-    canvas_data: UpdateCanvasRequestSchema,
-    user: Annotated[dict, Depends(get_current_user)],
-    strategy_service: StrategyService = Depends(get_strategy_service)
-) -> JSONResponse:
-    """Save the visual canvas node/edge graph and recompile it to Python strategy code."""
-    status_code, result = await strategy_service.update_canvas(
-        user_id=user["user_id"],
-        strategy_id=strategy_id,
-        canvas_json=canvas_data.canvas_json,
-        name=canvas_data.name,
-        description=canvas_data.description,
-    )
-    return BaseResponseHandler.success_response(data=result, status_code=status_code)
-
-@strategy_router.post(
-    "/{strategy_id}/reset-builder",
-    responses={
-        200: {
-            "model": SuccessResponseSchema[StrategyResponseSchema],
-            "description": "Successfully reset code custom changes back to visual canvas sync status",
-        },
-        404: {
-            "model": ErrorResponseSchema,
-            "description": "Strategy not found",
-        },
-    },
-)
-async def reset_to_visual_builder(
-    strategy_id: str,
-    user: Annotated[dict, Depends(get_current_user)],
-    strategy_service: StrategyService = Depends(get_strategy_service)
-) -> JSONResponse:
-    """Reset strategy state, overwriting custom code edits with re-compiled Visual Canvas code."""
-    status_code, result = await strategy_service.reset_to_visual_builder(
-        user_id=user["user_id"],
-        strategy_id=strategy_id
-    )
-    return BaseResponseHandler.success_response(data=result, status_code=status_code)
-
-@strategy_router.post(
-    "/{strategy_id}/backtest",
-    responses={
-        202: {
-            "model": SuccessResponseSchema[BacktestTriggerResponseSchema],
-            "description": "Backtest enqueued successfully",
-        },
-        404: {
-            "model": ErrorResponseSchema,
-            "description": "Strategy not found",
-        },
-    },
-)
-async def execute_backtest(
-    strategy_id: str,
-    bt_data: BacktestTriggerRequestSchema,
-    user: Annotated[dict, Depends(get_current_user)],
-    strategy_service: StrategyService = Depends(get_strategy_service)
-) -> JSONResponse:
-    """Run an institutional-grade simulation backtest asynchronously in a background sandbox."""
-    status_code, result = await strategy_service.trigger_backtest(
-        user_id=user["user_id"],
-        strategy_id=strategy_id,
-        start_date=bt_data.start_date,
-        end_date=bt_data.end_date,
-        initial_capital=bt_data.initial_capital,
-    )
-    return BaseResponseHandler.success_response(data=result, status_code=status_code)
 
 @strategy_router.delete(
-    "/{strategy_id}",
-    responses={
-        200: {
-            "model": SuccessResponseSchema[dict],
-            "description": "Strategy permanently deleted",
-        },
-        404: {
-            "model": ErrorResponseSchema,
-            "description": "Strategy not found",
-        },
-    },
+    "/research-runs/{run_id}",
+    dependencies=[Depends(security)],
 )
-async def delete_strategy(
-    strategy_id: str,
-    user: Annotated[dict, Depends(get_current_user)],
-    strategy_service: StrategyService = Depends(get_strategy_service)
+async def delete_run(
+    run_id: str,
+    user: Annotated[CurrentUser, Depends(get_current_user)],
+    strategy_service: StrategyService = Depends(get_strategy_service),
 ) -> JSONResponse:
-    """Permanently delete a strategy owned by the authenticated user."""
-    status_code, result = await strategy_service.delete_strategy(
-        user_id=user["user_id"],
-        strategy_id=strategy_id
-    )
+    """Delete a run from PostgreSQL database and clear its compressed msgpack payloads from storage."""
+    status_code, result = await strategy_service.delete_run(user.user_id, run_id)
     return BaseResponseHandler.success_response(data=result, status_code=status_code)
+
 
 @strategy_router.get(
-    "/{strategy_id}/backtests",
+    "/research-runs/{run_id}/progress",
+    dependencies=[Depends(security)],
     responses={
-        200: {
-            "model": SuccessResponseSchema[PaginatedBacktestsResponseSchema],
-            "description": "List all paginated backtest runs for a given strategy",
-        },
-        404: {
-            "model": ErrorResponseSchema,
-            "description": "Strategy not found",
-        },
+        200: {"model": SuccessResponseSchema[ResearchRunProgressResponseSchema]},
     },
 )
-async def list_strategy_backtests(
-    strategy_id: str,
-    user: Annotated[dict, Depends(get_current_user)],
-    page: int = 1,
-    limit: int = 8,
-    exchange: str | None = None,
-    symbol: str | None = None,
-    strategy_service: StrategyService = Depends(get_strategy_service)
+async def get_run_progress(
+    run_id: str,
+    user: Annotated[CurrentUser, Depends(get_current_user)],
+    strategy_service: StrategyService = Depends(get_strategy_service),
 ) -> JSONResponse:
-    """List historical backtest results for a specific strategy with pagination and filtering."""
-    status_code, result = await strategy_service.list_backtests(
-        user_id=user["user_id"],
-        strategy_id=strategy_id,
-        page=page,
-        limit=limit,
-        exchange=exchange,
-        symbol=symbol
+    """Fetch real-time active task progress metrics."""
+    status_code, result = await strategy_service.get_run_progress(
+        user.user_id, run_id
     )
     return BaseResponseHandler.success_response(data=result, status_code=status_code)
+
 
 @strategy_router.get(
-    "/{strategy_id}/backtests/{backtest_id}",
+    "/templates",
+    dependencies=[Depends(security)],
     responses={
-        200: {
-            "model": SuccessResponseSchema[BacktestResponseSchema],
-            "description": "Successfully retrieved target backtest run with curves intact",
-        },
-        404: {
-            "model": ErrorResponseSchema,
-            "description": "Strategy or backtest run not found",
-        },
+        200: {"model": SuccessResponseSchema[list[TemplateLibraryItemSchema]]},
     },
 )
-async def get_backtest(
-    strategy_id: str,
-    backtest_id: str,
-    user: Annotated[dict, Depends(get_current_user)],
-    strategy_service: StrategyService = Depends(get_strategy_service)
+async def get_templates(
+    user: Annotated[CurrentUser, Depends(get_current_user)],
+    strategy_service: StrategyService = Depends(get_strategy_service),
 ) -> JSONResponse:
-    """Fetch a specific backtest run with full detailed curves and performance logs."""
-    status_code, result = await strategy_service.get_backtest(
-        user_id=user["user_id"],
-        strategy_id=strategy_id,
-        backtest_id=backtest_id
-    )
+    """Fetch strategy templates library with pre-loaded latest results mapping summaries (no S3 scanning)."""
+    status_code, result = await strategy_service.get_template_library(user.user_id)
     return BaseResponseHandler.success_response(data=result, status_code=status_code)
 
-@strategy_router.delete(
-    "/{strategy_id}/backtests/{backtest_id}",
-    responses={
-        200: {
-            "model": SuccessResponseSchema[dict],
-            "description": "Backtest run deleted successfully",
-        },
-        404: {
-            "model": ErrorResponseSchema,
-            "description": "Strategy or backtest run not found",
-        },
-    },
+
+from app.modules.strategy_service.services.strategy_manager import strategy_manager
+from crypalgos_core.engine.context import ExecutionMode
+from pydantic import BaseModel
+
+
+class DeployRequest(BaseModel):
+    run_id: str
+    mode: str = "PAPER"
+    initial_capital: float = 10000.0
+    leverage: int = 1
+
+
+@strategy_router.post(
+    "/{strategy_id}/deploy",
+    dependencies=[Depends(security)],
 )
-async def delete_backtest(
+async def deploy_strategy(
     strategy_id: str,
-    backtest_id: str,
-    user: Annotated[dict, Depends(get_current_user)],
-    strategy_service: StrategyService = Depends(get_strategy_service)
+    payload: DeployRequest,
+    user: Annotated[CurrentUser, Depends(get_current_user)],
 ) -> JSONResponse:
-    """Permanently delete a specific backtest run."""
-    status_code, result = await strategy_service.delete_backtest(
-        user_id=user["user_id"],
+    """Deploy a strategy class dynamically in PAPER or LIVE mode."""
+    mode_enum = ExecutionMode[payload.mode.upper()]
+    await strategy_manager.deploy(
         strategy_id=strategy_id,
-        backtest_id=backtest_id
+        run_id=payload.run_id,
+        user_id=user.user_id,
+        mode=mode_enum,
+        initial_capital=payload.initial_capital,
+        leverage=payload.leverage,
     )
-    return BaseResponseHandler.success_response(data=result, status_code=status_code)
+    return BaseResponseHandler.success_response(
+        data={"message": "Strategy deployed successfully"}, status_code=200
+    )
+
+
+@strategy_router.post(
+    "/runs/{run_id}/stop",
+    dependencies=[Depends(security)],
+)
+async def stop_run(
+    run_id: str, user: Annotated[CurrentUser, Depends(get_current_user)]
+) -> JSONResponse:
+    """Stop a running strategy runner."""
+    await strategy_manager.stop(run_id)
+    return BaseResponseHandler.success_response(
+        data={"message": "Strategy runner stopped successfully"}, status_code=200
+    )
+
+
+@strategy_router.get(
+    "/runs/{run_id}/status",
+    dependencies=[Depends(security)],
+)
+async def get_run_status(
+    run_id: str, user: Annotated[CurrentUser, Depends(get_current_user)]
+) -> JSONResponse:
+    """Get the running status and latest metrics of an active strategy runner."""
+    status = strategy_manager.get_status(run_id)
+    return BaseResponseHandler.success_response(data=status, status_code=200)
+
+
+from fastapi import WebSocket, WebSocketDisconnect
+from app.modules.strategy_service.services.websocket_manager import websocket_manager
+
+
+@strategy_router.websocket("/runs/{run_id}/ws")
+async def strategy_run_websocket(websocket: WebSocket, run_id: str):
+    """Exposes real-time event updates stream for a running strategy session."""
+    await websocket_manager.connect(run_id, websocket)
+    try:
+        while True:
+            # Keep connection alive, listen for any client messages
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        websocket_manager.disconnect(run_id, websocket)
+    except Exception as e:
+        logger.error(f"WebSocket session error: {e}")
+        websocket_manager.disconnect(run_id, websocket)

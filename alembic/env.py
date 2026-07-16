@@ -6,12 +6,37 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 from alembic import context
 from app.config.settings import settings
 from app.config.base import Base
-from app.modules.user_service.models.session_model import Session
-from app.modules.user_service.models.user_model import User
-from app.modules.user_service.models.waitlist_model import Waitlist
-from app.modules.user_service.models.contact_model import ContactMessage
+
+# --- User Service Models ---
+from app.modules.user_service.models.session_model import Session  # noqa: F401
+from app.modules.user_service.models.user_model import User  # noqa: F401
+from app.modules.user_service.models.waitlist_model import Waitlist  # noqa: F401
+from app.modules.user_service.models.contact_model import ContactMessage  # noqa: F401
+from app.modules.user_service.models.credential_model import (  # noqa: F401
+    BrokerCredential,
+    CredentialAuditLog,
+    NotificationPreference,
+)
+
+# --- Strategy Service Models ---
 from app.modules.strategy_service.models.strategy_model import Strategy  # noqa: F401
-from app.modules.strategy_service.models.backtest_model import Backtest  # noqa: F401
+from app.modules.strategy_service.models.strategy_version_model import (
+    StrategyVersion,
+)  # noqa: F401
+from app.modules.strategy_service.models.research_run_model import (  # noqa: F401
+    ResearchRun,
+    StrategyLatestResults,
+)
+from app.modules.strategy_service.models.research_note_model import (
+    ResearchNote,
+)  # noqa: F401
+from app.modules.strategy_service.models.strategy_event_model import (
+    StrategyEvent,
+)  # noqa: F401
+from app.modules.strategy_service.models.live_trading_session_model import (
+    LiveTradingSession,
+)  # noqa: F401
+
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

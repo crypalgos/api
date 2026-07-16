@@ -1,0 +1,537 @@
+{
+  "canvas_version": "4.1",
+  "nodes": [
+    {
+      "id": "start-1",
+      "type": "startNode",
+      "position": {
+        "x": 0,
+        "y": -200
+      },
+      "data": {
+        "label": "Start Strategy",
+        "exchange": "delta"
+      }
+    },
+    {
+      "id": "data-btc",
+      "type": "dataNode",
+      "position": {
+        "x": -300,
+        "y": 0
+      },
+      "data": {
+        "label": "BTC Data",
+        "source": "delta",
+        "assetClass": "FUTURES",
+        "symbol": "BTCUSD",
+        "leverage": 3,
+        "dataType": "OHLCV",
+        "timeframes": [
+          "1h"
+        ]
+      }
+    },
+    {
+      "id": "data-eth",
+      "type": "dataNode",
+      "position": {
+        "x": 300,
+        "y": 0
+      },
+      "data": {
+        "label": "ETH Data",
+        "source": "delta",
+        "assetClass": "FUTURES",
+        "symbol": "ETHUSD",
+        "leverage": 3,
+        "dataType": "OHLCV",
+        "timeframes": [
+          "1h"
+        ]
+      }
+    },
+    {
+      "id": "indicator-btc",
+      "type": "indicatorNode",
+      "position": {
+        "x": -300,
+        "y": 200
+      },
+      "data": {
+        "label": "BTC Indicators",
+        "indicators": [
+          {
+            "id": "ind-btc-ema9",
+            "indicator": "EMA",
+            "timeframe": "1h",
+            "period": 9
+          },
+          {
+            "id": "ind-btc-ema21",
+            "indicator": "EMA",
+            "timeframe": "1h",
+            "period": 21
+          },
+          {
+            "id": "ind-btc-rsi14",
+            "indicator": "RSI",
+            "timeframe": "1h",
+            "period": 14
+          }
+        ]
+      }
+    },
+    {
+      "id": "indicator-eth",
+      "type": "indicatorNode",
+      "position": {
+        "x": 300,
+        "y": 200
+      },
+      "data": {
+        "label": "ETH Indicators",
+        "indicators": [
+          {
+            "id": "ind-eth-ema9",
+            "indicator": "EMA",
+            "timeframe": "1h",
+            "period": 9
+          },
+          {
+            "id": "ind-eth-ema21",
+            "indicator": "EMA",
+            "timeframe": "1h",
+            "period": 21
+          },
+          {
+            "id": "ind-eth-rsi14",
+            "indicator": "RSI",
+            "timeframe": "1h",
+            "period": 14
+          }
+        ]
+      }
+    },
+    {
+      "id": "cond-btc-long",
+      "type": "conditionNode",
+      "position": {
+        "x": -450,
+        "y": 400
+      },
+      "data": {
+        "label": "BTC Long",
+        "ast_root": {
+          "type": "GROUP",
+          "operator": "AND",
+          "children": [
+            {
+              "type": "CONDITION",
+              "left": {
+                "nodeId": "indicator-btc",
+                "indicator": "EMA",
+                "output": "value",
+                "indicatorId": "ind-btc-ema9",
+                "offset": 0
+              },
+              "operator": "CROSSES_ABOVE",
+              "right": {
+                "nodeId": "indicator-btc",
+                "indicator": "EMA",
+                "output": "value",
+                "indicatorId": "ind-btc-ema21",
+                "offset": 0
+              }
+            },
+            {
+              "type": "CONDITION",
+              "left": {
+                "nodeId": "indicator-btc",
+                "indicator": "RSI",
+                "output": "value",
+                "indicatorId": "ind-btc-rsi14",
+                "offset": 0
+              },
+              "operator": ">",
+              "right": 50
+            },
+            {
+              "type": "CONDITION",
+              "left": {
+                "nodeId": "indicator-btc",
+                "indicator": "RSI",
+                "output": "value",
+                "indicatorId": "ind-btc-rsi14",
+                "offset": 0
+              },
+              "operator": "<",
+              "right": 70
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "cond-btc-short",
+      "type": "conditionNode",
+      "position": {
+        "x": -150,
+        "y": 400
+      },
+      "data": {
+        "label": "BTC Short",
+        "ast_root": {
+          "type": "GROUP",
+          "operator": "AND",
+          "children": [
+            {
+              "type": "CONDITION",
+              "left": {
+                "nodeId": "indicator-btc",
+                "indicator": "EMA",
+                "output": "value",
+                "indicatorId": "ind-btc-ema9",
+                "offset": 0
+              },
+              "operator": "CROSSES_BELOW",
+              "right": {
+                "nodeId": "indicator-btc",
+                "indicator": "EMA",
+                "output": "value",
+                "indicatorId": "ind-btc-ema21",
+                "offset": 0
+              }
+            },
+            {
+              "type": "CONDITION",
+              "left": {
+                "nodeId": "indicator-btc",
+                "indicator": "RSI",
+                "output": "value",
+                "indicatorId": "ind-btc-rsi14",
+                "offset": 0
+              },
+              "operator": "<",
+              "right": 50
+            },
+            {
+              "type": "CONDITION",
+              "left": {
+                "nodeId": "indicator-btc",
+                "indicator": "RSI",
+                "output": "value",
+                "indicatorId": "ind-btc-rsi14",
+                "offset": 0
+              },
+              "operator": ">",
+              "right": 30
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "cond-eth-long",
+      "type": "conditionNode",
+      "position": {
+        "x": 150,
+        "y": 400
+      },
+      "data": {
+        "label": "ETH Long",
+        "ast_root": {
+          "type": "GROUP",
+          "operator": "AND",
+          "children": [
+            {
+              "type": "CONDITION",
+              "left": {
+                "nodeId": "indicator-eth",
+                "indicator": "EMA",
+                "output": "value",
+                "indicatorId": "ind-eth-ema9",
+                "offset": 0
+              },
+              "operator": "CROSSES_ABOVE",
+              "right": {
+                "nodeId": "indicator-eth",
+                "indicator": "EMA",
+                "output": "value",
+                "indicatorId": "ind-eth-ema21",
+                "offset": 0
+              }
+            },
+            {
+              "type": "CONDITION",
+              "left": {
+                "nodeId": "indicator-eth",
+                "indicator": "RSI",
+                "output": "value",
+                "indicatorId": "ind-eth-rsi14",
+                "offset": 0
+              },
+              "operator": ">",
+              "right": 50
+            },
+            {
+              "type": "CONDITION",
+              "left": {
+                "nodeId": "indicator-eth",
+                "indicator": "RSI",
+                "output": "value",
+                "indicatorId": "ind-eth-rsi14",
+                "offset": 0
+              },
+              "operator": "<",
+              "right": 70
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "cond-eth-short",
+      "type": "conditionNode",
+      "position": {
+        "x": 450,
+        "y": 400
+      },
+      "data": {
+        "label": "ETH Short",
+        "ast_root": {
+          "type": "GROUP",
+          "operator": "AND",
+          "children": [
+            {
+              "type": "CONDITION",
+              "left": {
+                "nodeId": "indicator-eth",
+                "indicator": "EMA",
+                "output": "value",
+                "indicatorId": "ind-eth-ema9",
+                "offset": 0
+              },
+              "operator": "CROSSES_BELOW",
+              "right": {
+                "nodeId": "indicator-eth",
+                "indicator": "EMA",
+                "output": "value",
+                "indicatorId": "ind-eth-ema21",
+                "offset": 0
+              }
+            },
+            {
+              "type": "CONDITION",
+              "left": {
+                "nodeId": "indicator-eth",
+                "indicator": "RSI",
+                "output": "value",
+                "indicatorId": "ind-eth-rsi14",
+                "offset": 0
+              },
+              "operator": "<",
+              "right": 50
+            },
+            {
+              "type": "CONDITION",
+              "left": {
+                "nodeId": "indicator-eth",
+                "indicator": "RSI",
+                "output": "value",
+                "indicatorId": "ind-eth-rsi14",
+                "offset": 0
+              },
+              "operator": ">",
+              "right": 30
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "act-btc-buy",
+      "type": "actionNode",
+      "position": {
+        "x": -450,
+        "y": 600
+      },
+      "data": {
+        "label": "BTC Buy",
+        "actionType": "buy",
+        "trigger": "ON_BAR_CLOSE",
+        "sizing": {
+          "mode": "PERCENT_OF_EQUITY",
+          "value": 10
+        }
+      }
+    },
+    {
+      "id": "act-btc-short",
+      "type": "actionNode",
+      "position": {
+        "x": -150,
+        "y": 600
+      },
+      "data": {
+        "label": "BTC Short",
+        "actionType": "short",
+        "trigger": "ON_BAR_CLOSE",
+        "sizing": {
+          "mode": "PERCENT_OF_EQUITY",
+          "value": 10
+        }
+      }
+    },
+    {
+      "id": "act-eth-buy",
+      "type": "actionNode",
+      "position": {
+        "x": 150,
+        "y": 600
+      },
+      "data": {
+        "label": "ETH Buy",
+        "actionType": "buy",
+        "trigger": "ON_BAR_CLOSE",
+        "sizing": {
+          "mode": "PERCENT_OF_EQUITY",
+          "value": 10
+        }
+      }
+    },
+    {
+      "id": "act-eth-short",
+      "type": "actionNode",
+      "position": {
+        "x": 450,
+        "y": 600
+      },
+      "data": {
+        "label": "ETH Short",
+        "actionType": "short",
+        "trigger": "ON_BAR_CLOSE",
+        "sizing": {
+          "mode": "PERCENT_OF_EQUITY",
+          "value": 10
+        }
+      }
+    },
+    {
+      "id": "policy-group-1",
+      "type": "policyGroupNode",
+      "position": {
+        "x": 0,
+        "y": 800
+      },
+      "data": {
+        "label": "Global Risk Policies",
+        "policies": [
+          {
+            "id": "pol-sl",
+            "type": "stop_loss",
+            "mode": "PERCENTAGE",
+            "value": 3,
+            "quantity_pct": 100
+          },
+          {
+            "id": "pol-tp",
+            "type": "take_profit",
+            "mode": "PERCENTAGE",
+            "value": 6,
+            "quantity_pct": 50
+          },
+          {
+            "id": "pol-trail",
+            "type": "trailing_stop",
+            "mode": "PERCENTAGE",
+            "value": 2,
+            "quantity_pct": 100
+          }
+        ]
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "edge-s1-btc",
+      "source": "start-1",
+      "target": "data-btc"
+    },
+    {
+      "id": "edge-s1-eth",
+      "source": "start-1",
+      "target": "data-eth"
+    },
+    {
+      "id": "edge-db-ib",
+      "source": "data-btc",
+      "target": "indicator-btc"
+    },
+    {
+      "id": "edge-de-ie",
+      "source": "data-eth",
+      "target": "indicator-eth"
+    },
+    {
+      "id": "edge-ib-cbl",
+      "source": "indicator-btc",
+      "target": "cond-btc-long"
+    },
+    {
+      "id": "edge-ib-cbs",
+      "source": "indicator-btc",
+      "target": "cond-btc-short"
+    },
+    {
+      "id": "edge-ie-cel",
+      "source": "indicator-eth",
+      "target": "cond-eth-long"
+    },
+    {
+      "id": "edge-ie-ces",
+      "source": "indicator-eth",
+      "target": "cond-eth-short"
+    },
+    {
+      "id": "edge-cbl-abl",
+      "source": "cond-btc-long",
+      "target": "act-btc-buy"
+    },
+    {
+      "id": "edge-cbs-abs",
+      "source": "cond-btc-short",
+      "target": "act-btc-short"
+    },
+    {
+      "id": "edge-cel-ael",
+      "source": "cond-eth-long",
+      "target": "act-eth-buy"
+    },
+    {
+      "id": "edge-ces-aes",
+      "source": "cond-eth-short",
+      "target": "act-eth-short"
+    },
+    {
+      "id": "edge-abl-pg",
+      "source": "act-btc-buy",
+      "target": "policy-group-1"
+    },
+    {
+      "id": "edge-abs-pg",
+      "source": "act-btc-short",
+      "target": "policy-group-1"
+    },
+    {
+      "id": "edge-ael-pg",
+      "source": "act-eth-buy",
+      "target": "policy-group-1"
+    },
+    {
+      "id": "edge-aes-pg",
+      "source": "act-eth-short",
+      "target": "policy-group-1"
+    }
+  ]
+}

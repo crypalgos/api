@@ -1,17 +1,24 @@
 import logging
+
 from app.exceptions.exceptions import ResourceNotFoundException
 from app.modules.user_service.models.contact_model import ContactMessage
 from app.modules.user_service.repositories.contact_repository import ContactRepository
-from app.modules.user_service.schema.contact_schema import ContactCreateSchema, ContactResponseSchema
+from app.modules.user_service.schema.contact_schema import (
+    ContactCreateSchema,
+    ContactResponseSchema,
+)
 from app.modules.user_service.schema.user_schema import GenericMessageSchema
 
 logger = logging.getLogger(__name__)
+
 
 class ContactService:
     def __init__(self, repository: ContactRepository):
         self.repository = repository
 
-    async def create_message(self, data: ContactCreateSchema) -> tuple[int, ContactResponseSchema]:
+    async def create_message(
+        self, data: ContactCreateSchema
+    ) -> tuple[int, ContactResponseSchema]:
         logger.info(f"Creating new contact message from {data.email}")
         new_msg = ContactMessage(
             name=data.name,
@@ -23,7 +30,9 @@ class ContactService:
         response_schema = ContactResponseSchema.model_validate(created_msg)
         return 201, response_schema
 
-    async def get_all_messages(self, offset: int = 0, limit: int = 50, query: str = "") -> tuple[int, dict]:
+    async def get_all_messages(
+        self, offset: int = 0, limit: int = 50, query: str = ""
+    ) -> tuple[int, dict]:
         logger.info("Fetching contact messages")
         paginated_result = await self.repository.get_all_paginated(offset, limit, query)
         items = paginated_result.get("ContactMessage", [])

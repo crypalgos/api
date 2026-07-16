@@ -12,6 +12,7 @@ from app.exceptions.exceptions import (
     ResourceAlreadyExistsException,
     ResourceNotFoundException,
     UnauthorizedAccessException,
+    ValidationException,
 )
 
 logger = logging.getLogger(__name__)
@@ -67,6 +68,16 @@ class GlobalExceptionHandler:
             return BaseResponseHandler.error_response(
                 message="Resource Already Exists",
                 status_code=409,
+                errors={"detail": exc.message},
+            )
+
+        @app.exception_handler(ValidationException)
+        async def handle_validation_exception(
+            _request: Request, exc: ValidationException
+        ) -> JSONResponse:
+            return BaseResponseHandler.error_response(
+                message="Unprocessable Entity",
+                status_code=422,
                 errors={"detail": exc.message},
             )
 
