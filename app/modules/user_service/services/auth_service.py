@@ -69,7 +69,7 @@ class AuthService:
         self, user_data: UserRegistrationSchema
     ) -> tuple[int, UserRegistrationResponseSchema]:
         """Register a new user or update an existing unverified user"""
-        if settings.waitlist and user_data.email != "ashishjangde54@gmail.com":
+        if settings.waitlist and user_data.email != settings.admin_email:
             raise UnauthorizedAccessException(
                 "Registration is restricted during pre-launch waitlist."
             )
@@ -159,7 +159,7 @@ class AuthService:
         if not user:
             raise InvalidCredentialsException("Invalid email/username or password")
 
-        if settings.waitlist and user.email != "ashishjangde54@gmail.com":
+        if settings.waitlist and user.email != settings.admin_email:
             raise UnauthorizedAccessException(
                 "Access is restricted during pre-launch waitlist."
             )
@@ -208,7 +208,7 @@ class AuthService:
         if not email:
             raise InvalidCredentialsException("Google token missing email claim")
 
-        if settings.waitlist and email != "ashishjangde54@gmail.com":
+        if settings.waitlist and email != settings.admin_email:
             raise UnauthorizedAccessException(
                 "Access is restricted during pre-launch waitlist."
             )
@@ -279,7 +279,7 @@ class AuthService:
         if not user:
             raise ResourceNotFoundException("User not found")
 
-        if settings.waitlist and user.email != "ashishjangde54@gmail.com":
+        if settings.waitlist and user.email != settings.admin_email:
             raise UnauthorizedAccessException(
                 "Access is restricted during pre-launch waitlist."
             )
