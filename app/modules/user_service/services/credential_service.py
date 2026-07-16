@@ -223,6 +223,38 @@ class CredentialService:
             await session.commit()
             return True
 
+    async def delete_broker_credential(self, credential_id: str, user_id: str) -> bool:
+        """Soft-deletes a broker credential (is_active=False). Keys stay encrypted at rest;
+        the row is retained for audit history but excluded from list_user_credentials."""
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(BrokerCredential).where(
+                    BrokerCredential.id == credential_id,
+                    BrokerCredential.user_id == user_id,
+                )
+            )
+            existing = result.scalars().first()
+            if not existing:
+                raise ValueError(f"Credential {credential_id} not found.")
+
+            stmt = (
+                update(BrokerCredential)
+                .where(
+                    BrokerCredential.id == credential_id,
+                    BrokerCredential.version == existing.version,
+                )
+                .values(is_active=False, version=existing.version + 1, updated_at=now_utc())
+            )
+            res = await session.execute(stmt)
+            if res.rowcount == 0:
+                raise Exception(
+                    "Concurrent update detected (Optimistic Locking failure)."
+                )
+
+            await self.log_audit_action(session, user_id, credential_id, "DELETE")
+            await session.commit()
+            return True
+
     async def get_decrypted_broker_credential(
         self, credential_id: str
     ) -> Optional[BrokerCredentials]:
@@ -259,10 +291,25 @@ class CredentialService:
                 logger.error(f"Error decrypting broker credential {credential_id}: {e}")
                 return None
 
+    def _masked_key(self, credential_id: str, api_key_encrypted: Optional[str]) -> str:
+        """Best-effort masked key. A row encrypted under a since-rotated/lost cipher
+        key (e.g. dev server restarted without a persisted CREDENTIAL_ENCRYPTION_KEY)
+        must not crash the whole list — surface it as unreadable instead."""
+        if not api_key_encrypted:
+            return ""
+        try:
+            return f"{self.decrypt(api_key_encrypted)[:6]}******"
+        except Exception as e:
+            logger.error(f"Error decrypting masked key for credential {credential_id}: {e}")
+            return "••••••(unreadable)"
+
     async def list_user_credentials(self, user_id: str) -> List[Dict[str, Any]]:
         async with AsyncSessionLocal() as session:
             result = await session.execute(
-                select(BrokerCredential).where(BrokerCredential.user_id == user_id)
+                select(BrokerCredential).where(
+                    BrokerCredential.user_id == user_id,
+                    BrokerCredential.is_active == True,  # noqa: E712
+                )
             )
             creds = result.scalars().all()
             return [
@@ -270,11 +317,7 @@ class CredentialService:
                     "id": c.id,
                     "exchange": c.exchange.value,
                     "account_label": c.account_label,
-                    "api_key_masked": (
-                        f"{self.decrypt(c.api_key_encrypted)[:6]}******"
-                        if c.api_key_encrypted
-                        else ""
-                    ),
+                    "api_key_masked": self._masked_key(c.id, c.api_key_encrypted),
                     "is_testnet": c.is_testnet,
                     "is_active": c.is_active,
                     "last_verified_at": c.last_verified_at,

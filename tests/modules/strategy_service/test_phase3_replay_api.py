@@ -280,7 +280,7 @@ async def test_trade_not_found_is_404(service):
 @pytest.mark.asyncio
 async def test_dataset_allowlist(service):
     with pytest.raises(ValidationException, match="not replayable"):
-        await service.get_dataset_window("u1", "r1", "trades", 0, 10)
+        await service.get_dataset_window("u1", "r1", "portfolio_equity", 0, 10)
     with pytest.raises(ValidationException, match="not replayable"):
         await service.get_dataset_window("u1", "r1", "../secrets", 0, 10)
 

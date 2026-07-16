@@ -24,7 +24,8 @@ MAX_REPLAY_WINDOW_CANDLES = 500
 
 # Only these datasets are addressable through the replay API
 REPLAY_DATASETS = frozenset(
-    {"candles", "indicator_snapshots", "runtime_events", "decision_traces"}
+    {"candles", "indicator_snapshots", "runtime_events", "decision_traces",
+     "trades", "orders", "execution_logs"}
 )
 
 # Runtime event types surfaced as timeline markers

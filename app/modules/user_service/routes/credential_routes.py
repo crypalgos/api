@@ -61,7 +61,6 @@ async def save_broker(
         )
         return BaseResponseHandler.success_response(
             data={"credential_id": cred_id},
-            message="Broker credentials saved successfully.",
             status_code=201,
         )
     except Exception as e:
@@ -108,9 +107,7 @@ async def save_notification_pref(
 ) -> JSONResponse:
     user_id = current_user.user_id
     await credential_service.save_notification_preference(user_id, payload.model_dump())
-    return BaseResponseHandler.success_response(
-        message="Notification preferences updated successfully.", status_code=200
-    )
+    return BaseResponseHandler.success_response(status_code=200)
 
 
 @credential_router.get("/preferences/notifications")
@@ -143,9 +140,23 @@ async def rotate_broker(
             api_secret=payload.api_secret,
             passphrase=payload.passphrase,
         )
-        return BaseResponseHandler.success_response(
-            message="Broker credentials rotated successfully.", status_code=200
-        )
+        return BaseResponseHandler.success_response(status_code=200)
     except Exception as e:
         logger.error(f"Error rotating broker credentials: {e}")
+        return BaseResponseHandler.error_response(message=str(e), status_code=400)
+
+
+@credential_router.delete("/broker/{credential_id}")
+async def delete_broker(
+    credential_id: str,
+    current_user: CurrentUser = Depends(get_current_user),
+) -> JSONResponse:
+    user_id = current_user.user_id
+    try:
+        await credential_service.delete_broker_credential(
+            credential_id=credential_id, user_id=user_id
+        )
+        return BaseResponseHandler.success_response(status_code=200)
+    except Exception as e:
+        logger.error(f"Error deleting broker credential: {e}")
         return BaseResponseHandler.error_response(message=str(e), status_code=400)
