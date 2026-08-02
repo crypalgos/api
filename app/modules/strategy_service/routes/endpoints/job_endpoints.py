@@ -329,18 +329,21 @@ async def list_montecarlos(
     user: Annotated[CurrentUser, Depends(get_current_user)],
     status: Optional[str] = None,
     is_favorite: Optional[bool] = None,
+    parent_run_id: Optional[str] = None,
     sort_by: str = "updated_at",
     page: int = 1,
     limit: int = 8,
     strategy_service: StrategyService = Depends(get_strategy_service),
 ) -> JSONResponse:
-    """List Monte Carlo simulation runs for a strategy."""
+    """List Monte Carlo simulation runs for a strategy, optionally scoped to a
+    single source backtest via parent_run_id."""
     status_code, result = await strategy_service.list_runs(
         user_id=user.user_id,
         strategy_id=strategy_id,
         run_type="MONTECARLO",
         status=status,
         is_favorite=is_favorite,
+        parent_run_id=parent_run_id,
         sort_by=sort_by,
         page=page,
         limit=limit,

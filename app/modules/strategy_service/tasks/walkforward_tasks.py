@@ -1,4 +1,5 @@
 import asyncio
+from app.config.settings import settings
 from app.modules.strategy_service.schema.strategy_schema import JobStatus, RunType
 from app.utils.artifact_paths import ArtifactPaths
 from app.utils.time_utils import now_utc
@@ -196,7 +197,19 @@ async def _execute_walkforward_internal(
         report_key = paths.report
 
         await storage_service.upload_payload(metadata_key, meta_payload)
-        await storage_service.upload_payload(report_key, report_payload)
+
+        # Split-artifact delivery (see report_split.py) — flagged, off by
+        # default. report_payload["report"] is the asdict(WalkForwardReport).
+        report_section_keys: dict[str, str] = {}
+        if settings.report_delivery_v2_enabled:
+            from app.modules.strategy_service.services.report_split import (
+                split_and_upload,
+            )
+            report_section_keys = await split_and_upload(
+                paths, "WALKFORWARD", report_payload["report"]
+            )
+        else:
+            await storage_service.upload_payload(report_key, report_payload)
 
         # Build database summary (extract validation metrics from the walkforward report's aggregate_metrics)
         summary_json = {
@@ -224,6 +237,32 @@ async def _execute_walkforward_internal(
             ),
             "trade_count": int(report.aggregate_metrics.get("mean_trade_count", 0)),
             "windows_count": len(result.windows),
+            # Everything below is already computed by build_walkforward_report()
+            # (aggregate_metrics/robustness/configuration) or already in scope
+            # (parameter_space_json/objective) -- just wasn't copied into the
+            # card's lightweight summary_json before. Powers the redesigned
+            # WalkforwardCard without any new crypalgos_core computation.
+            "win_rate": (
+                float(report.aggregate_metrics["mean_win_rate"])
+                if report.aggregate_metrics.get("mean_win_rate") is not None
+                else None
+            ),
+            "profit_factor": (
+                float(report.aggregate_metrics["mean_profit_factor"])
+                if report.aggregate_metrics.get("mean_profit_factor") is not None
+                else None
+            ),
+            "worst_max_drawdown_pct": (
+                float(report.aggregate_metrics["worst_max_drawdown"])
+                if report.aggregate_metrics.get("worst_max_drawdown") is not None
+                else None
+            ),
+            "robustness_score": report.robustness.get("score"),
+            "robustness_grade": report.robustness.get("grade"),
+            "train_period": report.configuration.get("train_period"),
+            "validation_period": report.configuration.get("validation_period"),
+            "parameter_count": len(parameter_space_json),
+            "objective": objective,
         }
 
         # Update DB
@@ -235,7 +274,13 @@ async def _execute_walkforward_internal(
                     run.completed_at = now_utc()
                     run.progress_percent = 100
                     run.metadata_s3_key = metadata_key
-                    run.report_s3_key = report_key
+                    if report_section_keys:
+                        # metadata_s3_key's setter above already merged
+                        # "metadata" into artifact_manifest — merge in the
+                        # new section keys rather than replacing the dict.
+                        run.artifact_manifest = {**(run.artifact_manifest or {}), **report_section_keys}
+                    else:
+                        run.report_s3_key = report_key
                     run.summary_json = summary_json
                     run.run_hash = run_hash
                     run.artifact_size_bytes = artifact_size

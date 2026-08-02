@@ -2,7 +2,7 @@ import os
 from typing import Final
 
 from dotenv import load_dotenv
-from pydantic import Field, AliasChoices
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings
 
 
@@ -74,12 +74,29 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("encryption_key", "credential_encryption_key")
     )
     s3_bucket_name: str = ""
+    # Gates split-artifact report delivery (report_split.py). Off -> task
+    # completion writes the old monolithic report.msgpack.zstd blob (current
+    # behavior). On -> new runs write per-tab sections instead, each proxied
+    # through the same /artifacts/{type} endpoint as before (no direct S3
+    # access from the browser). Flip off for an instant rollback with no
+    # redeploy; reading old runs' reports always works regardless of this
+    # flag (get_run_artifact falls back to report_s3_key).
+    report_delivery_v2_enabled: bool = False
+    # Durable per-session Testnet workspaces. They are intentionally separate
+    # from the production ClickHouse market-data store.
+    live_session_workspace_dir: str = "workspaces/live-sessions"
     aws_access_key_id: str = ""
     aws_secret_access_key: str = ""
     aws_default_region: str = "us-east-1"
     # Days an unpinned (is_favorite=False) Analyse-tab temporary run is kept
     # before the daily cleanup task deletes it. Pinned runs are never touched.
     temporary_run_retention_days: int = 30
+    # The API/Celery processes consume the dedicated streamer-service; they
+    # never open their own production exchange WebSocket.
+    streamer_zmq_address: str = Field(
+        default="tcp://127.0.0.1:5555",
+        validation_alias=AliasChoices("streamer_zmq_address", "crypalgos_zmq_address"),
+    )
 
     class Config:
         # computed once at import-time; can be overridden by setting ENV_FILE

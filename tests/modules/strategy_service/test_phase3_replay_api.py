@@ -13,6 +13,7 @@ import pyarrow as pa
 import pytest
 
 from crypalgos_core.events.arrow_schemas import events_to_arrow_table
+from crypalgos_core.pipeline.replay_tree import build_candle_trees
 
 from app.exceptions.exceptions import ResourceNotFoundException, ValidationException
 from app.modules.replay.services import replay_service as svc_mod
@@ -176,16 +177,20 @@ async def test_session_rejects_wrong_schema(service):
             await service.get_session("u1", "r1")
 
 
-# ── T-REPLAY-3/4: window ────────────────────────────────────────────────────
+# ── T-REPLAY-3/4: candle-tree nesting ───────────────────────────────────────
+#
+# ReplayService.get_window() — a single call returning a multi-candle window
+# of nested candle_trees in one JSON payload — was removed when replay moved
+# to per-dataset Arrow-IPC chunks (app/modules/replay/utils/arrow_reader.py);
+# the frontend now builds trees client-side from flat runtime_events chunks
+# (app/src/store/replay-store.ts). The tree-building primitive itself,
+# build_candle_trees(), is unchanged and still the real code path get_trade()
+# uses for a single candle (via ReplayIndex.tree_at()) — tested directly here
+# against the full multi-candle EVENTS fixture instead of through the removed
+# endpoint.
 
-@pytest.mark.asyncio
-async def test_window_filters_by_candle_index_and_nests(service):
-    window = await service.get_window("u1", "r1", 1, 2)
-
-    assert [c["candle_index"] for c in window["candles"]] == [1, 2]
-
-    trees = {g["candle_index"]: g for g in window["candle_trees"]}
-    assert set(trees) == {1, 2}
+def test_build_candle_trees_nests_causally_within_a_candle():
+    trees = {g["candle_index"]: g for g in build_candle_trees(EVENTS)}
 
     # candle 1: bar -> condition -> action -> order, fully nested
     bar = trees[1]["bar"]
@@ -197,28 +202,30 @@ async def test_window_filters_by_candle_index_and_nests(service):
     order = action["children"][0]
     assert order["type"] == "ORDER_CREATED"
 
-    # zero-lookahead: the fill (candle 2) nests causally under its order (candle 1)
-    fill = order["children"][0]
-    assert fill["type"] == "ORDER_FILLED" and fill["candle_index"] == 2
-
     # payload decoded from the typed Arrow column
     assert cond["payload"]["passed"] is True
 
 
-@pytest.mark.asyncio
-async def test_window_orphans_preserved_at_window_edge(service):
-    """A fill whose parent order falls outside the window is kept as an orphan."""
-    window = await service.get_window("u1", "r1", 2, 2)
-    trees = {g["candle_index"]: g for g in window["candle_trees"]}
+def test_build_candle_trees_orphans_cross_candle_children_instead_of_dropping():
+    """Audit finding #72: a child whose parent_sequence points to an event on
+    a DIFFERENT candle is never nested under that distant parent (it would
+    vanish from its own candle's view) and never silently dropped — it's
+    kept as an orphan in its own candle's group.
+    """
+    trees = {g["candle_index"]: g for g in build_candle_trees(EVENTS)}
+
+    order = trees[1]["bar"]["children"][0]["children"][0]["children"][0]
+    assert order["type"] == "ORDER_CREATED"
+    assert order["children"] == []  # the fill below is NOT nested here
+
     orphan_seqs = {o["sequence_number"] for o in trees[2]["orphans"]}
-    assert 8 in orphan_seqs  # ORDER_FILLED, parent seq 7 not in window
+    assert 8 in orphan_seqs  # ORDER_FILLED, parent seq 7 lives on candle 1
 
 
-@pytest.mark.asyncio
-async def test_window_events_have_no_shim_fields(service):
+def test_build_candle_trees_events_have_no_shim_fields():
     """Engine v2: linkage is parent_sequence/root_sequence ints — nothing else."""
-    window = await service.get_window("u1", "r1", 0, 0)
-    cond = window["candle_trees"][0]["bar"]["children"][0]
+    trees = {g["candle_index"]: g for g in build_candle_trees(EVENTS)}
+    cond = trees[0]["bar"]["children"][0]
     assert cond["parent_sequence"] == 1
     assert cond["root_sequence"] == 1
     assert "correlation_id" not in cond
@@ -227,13 +234,15 @@ async def test_window_events_have_no_shim_fields(service):
 
 
 @pytest.mark.asyncio
-async def test_window_bounds(service):
+async def test_dataset_window_bounds_reject_backwards_and_negative(service):
+    """_validate_window's bounds checks — still real, live logic, exercised
+    through get_dataset_window() (get_window() itself was removed, see above)."""
     with pytest.raises(ValidationException, match="Window too large"):
-        await service.get_window("u1", "r1", 0, MAX_REPLAY_WINDOW_CANDLES)
+        await service.get_dataset_window("u1", "r1", "candles", 0, MAX_REPLAY_WINDOW_CANDLES)
     with pytest.raises(ValidationException, match="Invalid window"):
-        await service.get_window("u1", "r1", 5, 2)
+        await service.get_dataset_window("u1", "r1", "candles", 5, 2)
     with pytest.raises(ValidationException, match="Invalid window"):
-        await service.get_window("u1", "r1", -1, 2)
+        await service.get_dataset_window("u1", "r1", "candles", -1, 2)
 
 
 # ── T-REPLAY-7: trade inspector ─────────────────────────────────────────────

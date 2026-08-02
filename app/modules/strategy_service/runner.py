@@ -1,17 +1,19 @@
 import asyncio
 import logging
-from typing import Type, Dict, Any, Optional
-from crypalgos_core.engine.strategy_base import StrategyBase
+from typing import Any, Optional, Type
+
 from crypalgos_core.engine.context import ExecutionContext, ExecutionMode
 from crypalgos_core.engine.risk_engine import RiskEngine
+from crypalgos_core.engine.strategy_base import StrategyBase
 from crypalgos_core.events.engine_bus import EngineEventBus
-from crypalgos_core.events.engine_events import (
-    OrderSubmittedEvent,
-    OrderFilledEvent,
-    PositionOpenedEvent,
-    PositionClosedEvent,
-)
+
 from app.modules.data_service.live_feed import live_feed_subscriber
+from app.modules.strategy_service.execution.broker_compat import resolve_broker_call
+from app.modules.strategy_service.execution.tick_sources import parse_ohlcv_tick
+from app.modules.strategy_service.execution.trading_runtime import (
+    RuntimeFactory,
+    TradingRuntime,
+)
 from app.modules.strategy_service.paper_broker import PaperBroker
 
 logger = logging.getLogger(__name__)
@@ -105,6 +107,38 @@ class ExecutionRunner:
         self.strategy.is_live = True
         self.is_running = False
 
+        # Same resolution RuntimeFactory.build() uses for Path A — falls back
+        # to "1m" for a strategy with no declared datasources/timeframes
+        # rather than raising, since Path B has historically tolerated that
+        # (unlike Path A, which requires it to pick a tick source).
+        try:
+            timeframe = RuntimeFactory._resolve_primary_timeframe(strategy_class)
+        except ValueError:
+            timeframe = "1m"
+
+        # Drives the same TickEngine the durable Celery path (LiveTradingRunner)
+        # uses, via TradingRuntime — constructed directly here (not through
+        # RuntimeFactory, which builds from a LiveTradingSession DB row that
+        # Path A has and Path B doesn't) so both paths run provably identical
+        # execution logic during the migration window. Persistence/websocket/
+        # notification fan-out stays on self.bus below (unchanged) rather than
+        # TradingRuntime's own EventPublisher, to avoid double-writing events.
+        # bus=self.bus is the SAME EngineEventBus already passed to the
+        # strategy above — required for TickEngine to collect the strategy's
+        # own decision-trace events and share one sequence space with them
+        # (see TickEngine's docstring). Path B has no IndicatorWarmup wiring
+        # yet (RuntimeFactory.build()/Path A only) — indicator VALUES won't
+        # update here even though decision-trace events now will; tracked
+        # separately, not blocking this fix.
+        self.runtime = TradingRuntime(
+            strategy=self.strategy,
+            broker=self.broker,
+            risk_engine=self.risk_engine,
+            context=self.context,
+            timeframe=timeframe,
+            bus=self.bus,
+        )
+
     async def start(self):
         if self.is_running:
             return
@@ -118,18 +152,21 @@ class ExecutionRunner:
         self.is_running = True
 
         # Subscribe to ZMQ live feeds
-        live_feed_subscriber.register_callback(self.on_market_tick)
+        # Legacy ExecutionRunner may represent more than one instrument, so it
+        # remains an explicit all-symbol subscriber. LiveTradingRunner uses
+        # the symbol-keyed provider path instead.
+        live_feed_subscriber.register_global_callback(self.on_market_tick)
         await live_feed_subscriber.start()
 
     async def stop(self):
         self.is_running = False
-        live_feed_subscriber.unregister_callback(self.on_market_tick)
+        live_feed_subscriber.unregister_global_callback(self.on_market_tick)
         logger.info(f"ExecutionRunner {self.context.strategy_run_id} stopped.")
 
     async def reconcile_state(self) -> None:
         """Query the broker for latest balances and positions to reconcile local strategy state."""
         try:
-            balances = await self.broker.get_balances()
+            balances = await resolve_broker_call(self.broker.get_balances())
             logger.info(f"Reconciled runner balances: {balances}")
             if hasattr(self.strategy, "portfolio_engine"):
                 pe = self.strategy.portfolio_engine
@@ -142,86 +179,25 @@ class ExecutionRunner:
         if not self.is_running:
             return
 
-        # Delta data streamer publishes ohlcv data under topic: 'ohlcv:<symbol>'
-        if topic.startswith("ohlcv:"):
-            symbol = topic.split(":")[-1]
+        bar_event = parse_ohlcv_tick(topic, data)
+        if bar_event is None:
+            return
 
-            # Format candle data for Strategy context
-            # schema: timestamp, open, high, low, close, volume
-            candle_arr = [
-                data.get("timestamp"),
-                data.get("open"),
-                data.get("high"),
-                data.get("low"),
-                data.get("close"),
-                data.get("volume"),
-            ]
+        try:
+            # TickEngine drives strategy -> risk check -> broker and returns
+            # typed events; called directly (not via runtime.tick()) so this
+            # runner's own persistence/websocket/notification wiring below
+            # remains the single place those events are published, matching
+            # today's behavior.
+            events = await self.runtime.tick_engine.process_bar(bar_event)
+        except Exception as e:
+            logger.error(f"ExecutionRunner runtime exception: {e}")
+            return
 
-            # Feed current candle into strategy
-            self.strategy._current_time = data.get("timestamp")
-            self.strategy._current_candle = candle_arr
-
-            # Update Broker pricing to value open positions accurately
-            if hasattr(self.broker, "update_mark_price"):
-                self.broker.update_mark_price(symbol, data.get("close"))
-
-            # Create a mock Event for Strategy base on_event handler
-            from crypalgos_core.events import Event, EventType
-
-            bar_event = Event(
-                type=EventType.BAR,
-                timestamp=self.strategy._current_time,
-                symbol=symbol,
-                data={"candle": candle_arr},
-            )
-
+        for event in events:
             try:
-                # Trigger strategy logic
-                self.strategy.on_event(bar_event)
-
-                # Fetch emitted OrderIntents
-                intents = self.strategy.get_and_clear_intents()
-                for intent in intents:
-                    # Retrieve current position state
-                    pos = self.broker.get_position(intent.symbol)
-                    pos_qty = (
-                        pos.get("qty", 0.0)
-                        if pos.get("side") == "LONG"
-                        else -pos.get("qty", 0.0)
-                    )
-
-                    # Risk Engine validation check
-                    self.risk_engine.evaluate_intent(
-                        intent,
-                        current_position_size=pos_qty,
-                        current_leverage=float(self.strategy.leverage),
-                    )
-
-                    # Broker order submission
-                    receipt = self.broker.submit_order(
-                        symbol=intent.symbol,
-                        side=intent.side,
-                        qty=intent.qty,
-                        price=intent.price,
-                        order_type=intent.order_type,
-                    )
-
-                    # Fire Events on filled
-                    seq = self.bus.next_sequence()
-                    if receipt.status == "FILLED":
-                        # Publish OrderFilledEvent
-                        self.bus.publish(
-                            OrderFilledEvent(
-                                sequence_number=seq,
-                                timestamp=int(receipt.timestamp * 1000),
-                                symbol_id=intent.symbol,
-                                order_id=receipt.order_id,
-                                side=intent.side,
-                                fill_price=receipt.average_price,
-                                fill_quantity=receipt.filled_qty,
-                                fee=0.0,
-                                context=self.context,
-                            )
-                        )
-            except Exception as e:
-                logger.error(f"ExecutionRunner runtime exception: {e}")
+                self.bus.publish(event)
+            except Exception:
+                logger.exception(
+                    f"ExecutionRunner failed to publish {type(event).__name__} to bus"
+                )

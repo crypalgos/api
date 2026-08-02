@@ -1,5 +1,6 @@
 import logging
 import uuid
+from typing import Any
 
 from google.auth.transport import requests as google_requests
 from google.oauth2 import id_token
@@ -355,7 +356,7 @@ class AuthService:
 
     async def refresh_token(
         self, refresh_data: RefreshTokenSchema
-    ) -> tuple[int, dict[str, str]]:
+    ) -> tuple[int, dict[str, Any]]:
         """Refresh access token using refresh token"""
         # Verify refresh token
         if not JWTUtils.verify_refresh_token(refresh_data.refresh_token):

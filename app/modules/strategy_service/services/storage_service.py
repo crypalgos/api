@@ -78,8 +78,29 @@ class StorageService:
         except ClientError as e:
             raise FileNotFoundError(f"Key {key} not found in S3: {e}")
 
-        decompressed = self.decompressor.decompress(compressed)
-        return msgpack.unpackb(decompressed, raw=False)
+        # zstd decompress + msgpack unpack are CPU-bound and were previously
+        # called synchronously here, blocking the event loop for the duration
+        # of every report read. Thread-offload them like the S3 call above.
+        def _decode() -> Any:
+            decompressed = self.decompressor.decompress(compressed)
+            return msgpack.unpackb(decompressed, raw=False)
+
+        return await asyncio.to_thread(_decode)
+
+    async def upload_msgpack_raw(self, key: str, data: Any) -> str:
+        """Serializes with msgpack only (no zstd) and uploads — for small
+        report sections where compression saves bytes but costs a browser-side
+        WASM decompressor dependency for marginal benefit. See report_split.py."""
+        serialized = await asyncio.to_thread(msgpack.packb, data, use_bin_type=True)
+        await asyncio.to_thread(
+            self.s3_client.put_object, Bucket=self.s3_bucket, Key=key, Body=serialized
+        )
+        return key
+
+    async def download_msgpack_raw(self, key: str) -> Any:
+        """Downloads and msgpack-unpacks (no zstd) — pairs with upload_msgpack_raw."""
+        raw = await self.download_raw_payload(key)
+        return await asyncio.to_thread(msgpack.unpackb, raw, raw=False)
 
     async def delete_payload(self, key: str) -> None:
         """Deletes object from S3 asynchronously."""

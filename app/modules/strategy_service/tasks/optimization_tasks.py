@@ -1,4 +1,5 @@
 import asyncio
+from app.config.settings import settings
 from app.modules.strategy_service.schema.strategy_schema import JobStatus, RunType
 from app.utils.artifact_paths import ArtifactPaths
 from app.utils.time_utils import now_utc
@@ -237,7 +238,17 @@ async def _execute_optimization_internal(
         report_key = paths.report
 
         await storage_service.upload_payload(metadata_key, meta_payload)
-        await storage_service.upload_payload(report_key, report_payload)
+
+        # Split-artifact delivery (see report_split.py) — flagged, off by
+        # default. report_payload is already flat here (no "report" wrapper).
+        report_section_keys: dict[str, str] = {}
+        if settings.report_delivery_v2_enabled:
+            from app.modules.strategy_service.services.report_split import (
+                split_and_upload,
+            )
+            report_section_keys = await split_and_upload(paths, "OPTIMIZATION", report_payload)
+        else:
+            await storage_service.upload_payload(report_key, report_payload)
 
         # Build database summary (take primary objectives from the best result if it exists)
         best_metrics = best.metrics if best else {}
@@ -250,6 +261,22 @@ async def _execute_optimization_internal(
             "max_drawdown_pct": best_metrics.get("max_drawdown_pct", 0.0),
             "trade_count": best_metrics.get("total_trades", 0),
             "total_results": len(opt_run.results),
+            # Everything below was already computed above (best.params,
+            # best_metrics, stability_region) or already in scope
+            # (objective, params) -- just wasn't copied into the card's
+            # lightweight summary_json before. Powers the redesigned
+            # OptimizationCard without any new crypalgos_core computation.
+            "win_rate": best_metrics.get("win_rate"),
+            "profit_factor": best_metrics.get("profit_factor"),
+            "expectancy": best_metrics.get("expectancy"),
+            "best_parameters": best.params if best else {},
+            "parameter_count": len(params),
+            "objective": objective,
+            "objective_value": best_metrics.get(objective),
+            "search_type": search_type,
+            "robustness_pct": (
+                stability_region.get("confidence") if stability_region.get("available") else None
+            ),
         }
 
         # Update DB
@@ -261,7 +288,14 @@ async def _execute_optimization_internal(
                     run.completed_at = now_utc()
                     run.progress_percent = 100
                     run.metadata_s3_key = metadata_key
-                    run.report_s3_key = report_key
+                    if report_section_keys:
+                        # metadata_s3_key's setter above already merged
+                        # "metadata" into artifact_manifest — merge the new
+                        # section keys in too rather than replacing the dict
+                        # outright, or "metadata" gets silently dropped.
+                        run.artifact_manifest = {**(run.artifact_manifest or {}), **report_section_keys}
+                    else:
+                        run.report_s3_key = report_key
                     run.summary_json = summary_json
                     run.run_hash = run_hash
                     run.artifact_size_bytes = artifact_size

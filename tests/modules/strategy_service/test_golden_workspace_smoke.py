@@ -71,10 +71,24 @@ async def test_full_replay_pipeline_against_golden_artifact(service, name):
         assert "entry" in marker_types and "exit" in marker_types
 
         start = session["first_candle_index"]
-        window = await service.get_window("u1", "run-golden", start, start + 49)
-        assert window["candles"], "window at the real starting candle must return rows"
-        assert window["candle_trees"], "window must return nested event trees"
-        nested = [g for g in window["candle_trees"] if g["bar"] and g["bar"]["children"]]
+
+        # get_window() (a single call returning nested candle_trees for a
+        # multi-candle range) was removed when replay moved to per-dataset
+        # Arrow-IPC chunks — the frontend builds trees client-side now. The
+        # underlying tree-building path (ReplayIndex.tree_at(), the same
+        # thing get_trade() uses below) is exercised directly here instead.
+        _, candle_rows = await service.get_dataset_window(
+            "u1", "run-golden", "candles", start, start + 49
+        )
+        assert candle_rows, "window at the real starting candle must return rows"
+
+        reader = await service._reader("u1", "run-golden")
+        index = await service._load_index(reader, "run-golden")
+        window_trees = [
+            t for t in (index.tree_at(c) for c in range(start, start + 50)) if t is not None
+        ]
+        assert window_trees, "window must return nested event trees"
+        nested = [g for g in window_trees if g["bar"] and g["bar"]["children"]]
         assert nested, "at least one candle in the window must have a nested decision tree"
 
         reader = await service._reader("u1", "run-golden")

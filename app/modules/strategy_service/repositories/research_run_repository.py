@@ -24,6 +24,7 @@ class ResearchRunRepository(BaseRepository[ResearchRun]):
         status: Optional[str] = None,
         is_favorite: Optional[bool] = None,
         is_temporary: Optional[bool] = None,
+        parent_run_id: Optional[str] = None,
         sort_by: str = "updated_at",
         page: int = 1,
         limit: int = 8,
@@ -44,6 +45,8 @@ class ResearchRunRepository(BaseRepository[ResearchRun]):
             filters.append(ResearchRun.is_favorite == is_favorite)
         if is_temporary is not None:
             filters.append(ResearchRun.is_temporary == is_temporary)
+        if parent_run_id:
+            filters.append(ResearchRun.parent_run_id == parent_run_id)
 
         if filters:
             stmt = stmt.where(and_(*filters))

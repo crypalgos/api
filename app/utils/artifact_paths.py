@@ -36,6 +36,21 @@ class ArtifactPaths:
     def decision(self) -> str:
         return f"{self.base}/decision.arrow.zstd"
 
+    def report_section(self, name: str, version: int = 1) -> str:
+        """Small scalar/summary report sections (KPI strips, risk stat cells,
+        configuration, distribution summaries) — msgpack only, no zstd (see
+        report_split.py). Versioned path segment lets a future change to a
+        section's content shape ship as v2 without touching runs that already
+        wrote v1 — their artifact_manifest keeps pointing at the v1 key."""
+        return f"{self.base}/sections/v{version}/{name}.msgpack"
+
+    def report_section_arrow(self, name: str, version: int = 1) -> str:
+        """Row/table-shaped report sections (leaderboard rows, optimization
+        all_results, walkforward per-window rollups) that don't already have
+        a dedicated dataset method below — Arrow IPC, same versioning as
+        report_section()."""
+        return f"{self.base}/sections/v{version}/{name}.arrow"
+
     def montecarlo_dataset(self, name: str) -> str:
         """Chart datasets referenced by MonteCarloReport.charts[*].dataset —
         crypalgos_core.montecarlo.reporting.build_montecarlo_report() writes

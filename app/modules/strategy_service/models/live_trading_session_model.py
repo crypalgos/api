@@ -1,8 +1,10 @@
 import uuid
 from datetime import datetime
+from enum import StrEnum
 from typing import TYPE_CHECKING, Optional
 
 from sqlalchemy import DateTime, ForeignKey, Index, String, text
+from sqlalchemy import Enum as SAEnum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
@@ -13,6 +15,30 @@ if TYPE_CHECKING:
     from app.modules.strategy_service.models.strategy_version_model import (
         StrategyVersion,
     )
+
+
+class SessionEnvironment(StrEnum):
+    """Immutable Delta market environment used by execution and replay."""
+
+    TESTNET = "TESTNET"
+    PRODUCTION = "PRODUCTION"
+
+
+class SessionState(StrEnum):
+    """Legal transitions:
+    STARTING -> RUNNING | ERROR
+    RUNNING -> STOPPING | ERROR | RECOVERING
+    RECOVERING -> RUNNING | ERROR
+    STOPPING -> STOPPED
+    ERROR and STOPPED are terminal.
+    """
+
+    STARTING = "STARTING"
+    RUNNING = "RUNNING"
+    STOPPING = "STOPPING"
+    STOPPED = "STOPPED"
+    ERROR = "ERROR"
+    RECOVERING = "RECOVERING"
 
 
 class LiveTradingSession(Base):
@@ -51,15 +77,33 @@ class LiveTradingSession(Base):
         index=True,
     )
 
-    # Execution mode and broker
+    # Execution mode is separate from the immutable market environment.
     mode: Mapped[str] = mapped_column(String(16), nullable=False)  # "LIVE" | "PAPER"
-    broker: Mapped[str] = mapped_column(String(32), nullable=False)  # "delta" | "paper"
+    broker: Mapped[str] = mapped_column(String(32), nullable=False)
+    exchange: Mapped[str] = mapped_column(String(32), nullable=False)
+    environment: Mapped[SessionEnvironment] = mapped_column(
+        SAEnum(SessionEnvironment, name="session_environment"), nullable=False
+    )
+    symbol: Mapped[str] = mapped_column(String(128), nullable=False)
+    timeframe: Mapped[str] = mapped_column(String(16), nullable=False)
 
-    # Session lifecycle status
-    # STARTING → RUNNING → STOPPING → STOPPED
-    #                              ↘ ERROR → RECOVERING → RUNNING
-    status: Mapped[str] = mapped_column(
-        String(32), default="STARTING", nullable=False, index=True
+    # Which of the user's broker credentials executes this session. Every
+    # session requires one: PAPER uses a Delta Testnet credential and LIVE
+    # uses a Delta Production credential. A user can hold multiple credentials
+    # for the same exchange, so the selected one is immutable session metadata.
+    credential_id: Mapped[Optional[str]] = mapped_column(
+        String(150),
+        ForeignKey("broker_credentials.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
+    # Session lifecycle status — see SessionState for legal transitions.
+    status: Mapped[SessionState] = mapped_column(
+        SAEnum(SessionState, name="session_state"),
+        default=SessionState.STARTING,
+        nullable=False,
+        index=True,
     )
 
     # Celery task ID for tracking and revoke

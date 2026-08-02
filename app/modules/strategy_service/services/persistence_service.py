@@ -1,6 +1,6 @@
 import logging
 from typing import Any
-from crypalgos_core.events import Event
+
 from app.db.connect_db import AsyncSessionLocal
 from app.modules.strategy_service.models.strategy_event_model import StrategyEvent
 
@@ -22,33 +22,21 @@ class PersistenceService:
             )
             return
 
-        # Prepare payload dictionary
-        payload = {}
-        for key, val in event.__dict__.items():
-            if key == "context":
-                # Convert context object to dict format
-                payload["context"] = {
-                    "strategy_run_id": val.strategy_run_id,
-                    "user_id": val.user_id,
-                    "mode": (
-                        val.mode.name if hasattr(val.mode, "name") else str(val.mode)
-                    ),
-                    "workspace_id": val.workspace_id,
-                    "started_at": val.started_at,
-                }
-            elif hasattr(val, "name"):
-                # Enum conversions
-                payload[key] = val.name
-            else:
-                payload[key] = val
+        # EngineEvent subclasses are `@dataclass(slots=True, ...)` — instances
+        # have no `__dict__`, so building the payload from `event.__dict__`
+        # (as this used to) raises AttributeError on every call. That's silent
+        # here because the caller wraps this in an unawaited asyncio.create_task.
+        # to_dict() is the event's own supported serialization (already used
+        # by app/modules/strategy_service/execution/event_publisher.py).
+        d = event.to_dict()
 
         async with AsyncSessionLocal() as session:
             try:
                 db_event = StrategyEvent(
                     strategy_run_id=run_id,
-                    event_type=event.__class__.__name__,
+                    event_type=d["type"],
                     event_version=getattr(event, "event_version", "1.0"),
-                    payload=payload,
+                    payload=d["payload"],
                 )
                 session.add(db_event)
                 await session.commit()

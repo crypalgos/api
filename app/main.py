@@ -61,10 +61,10 @@ async def favicon() -> RedirectResponse:
     return RedirectResponse(url="https://crypalgos.com/favicon.ico")
 
 
-from app.modules.user_service.routes.credential_routes import credential_router
+from app.modules.config_service.routes.config_routes import config_router
 from app.modules.data_service.routes.market_routes import market_router
 from app.modules.replay.routes.replay_routes import replay_router
-from app.modules.config_service.routes.config_routes import config_router
+from app.modules.user_service.routes.credential_routes import credential_router
 
 # Include routers
 app.include_router(auth_router, prefix="/api/v1")
@@ -77,7 +77,9 @@ app.include_router(market_router, prefix="/api/v1")
 app.include_router(replay_router, prefix="/api/v1")
 app.include_router(config_router, prefix="/api/v1")
 
-# Setup Data Service
-from app.modules.data_service.manager import setup_data_service
+# Setup live-session Redis -> WebSocket bridge
+from app.modules.strategy_service.services.live_event_bridge import (
+    setup_live_event_bridge,
+)
 
-setup_data_service(app)
+setup_live_event_bridge(app)

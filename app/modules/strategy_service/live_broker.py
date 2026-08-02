@@ -1,8 +1,10 @@
 import logging
 import time
-from typing import Dict, Any, Optional
+from typing import Any, Dict, Optional
+
 from crypalgos_core.engine.broker import ExecutionBroker, OrderReceipt
 from crypalgos_data.exchanges.delta import DeltaAPI
+
 from app.config.settings import settings
 
 logger = logging.getLogger(__name__)
@@ -11,21 +13,28 @@ logger = logging.getLogger(__name__)
 class LiveExchangeBroker(ExecutionBroker):
     def __init__(
         self,
-        api_key: Optional[str] = None,
-        api_secret: Optional[str] = None,
+        api_key: str,
+        api_secret: str,
         testnet: bool = True,
     ):
-        key = api_key or settings.get("DELTA_API_KEY", "")
-        secret = api_secret or settings.get("DELTA_API_SECRET", "")
+        key = api_key 
+        secret = api_secret
 
-        # Instantiate Delta API from crypalgos_data
+        self.testnet = testnet
+        # Instantiate Delta API from crypalgos_data.
         self.api = DeltaAPI(api_key=key, api_secret=secret, testnet=testnet)
 
     async def submit_order(
         self, symbol: str, side: str, qty: float, price: float, order_type: str
     ) -> OrderReceipt:
+        environment = "Testnet" if self.testnet else "Production"
         logger.info(
-            f"Submitting LIVE order to Delta Exchange: {side} {qty} {symbol} @ {price}"
+            "Submitting %s Delta order: %s %s %s @ %s",
+            environment,
+            side,
+            qty,
+            symbol,
+            price,
         )
 
         delta_side = "buy" if side == "LONG" else "sell"

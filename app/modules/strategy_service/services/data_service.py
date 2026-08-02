@@ -189,6 +189,13 @@ class DataServiceMixin:
             if key.endswith(".msgpack.zstd"):
                 payload = await storage_service.download_payload(key)
                 return 200, payload
+            elif key.endswith(".msgpack"):
+                # Split-artifact sections (report_split.py) are written
+                # without zstd — small enough that compression isn't worth
+                # the extra decode step. Proxied through this same endpoint
+                # as plain JSON, same as the legacy monolithic report.
+                payload = await storage_service.download_msgpack_raw(key)
+                return 200, payload
             else:
                 raise ValueError(
                     "Only msgpack JSON artifacts are supported via this endpoint"

@@ -161,3 +161,6 @@ alembic/versions/__pycache__/
 .env.prod
 .env.dev
 .commandcode
+
+# Local runtime data (live-session candle/event dumps), never source
+workspaces/

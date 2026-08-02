@@ -1,3 +1,4 @@
+import hashlib
 import logging
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
@@ -21,6 +22,7 @@ logger = logging.getLogger(__name__)
 REQUIRED_SCHEMA_VERSION = 3
 # Hard limit per window request — the browser never loads more
 MAX_REPLAY_WINDOW_CANDLES = 500
+CHUNK_SIZE = 1000
 
 # Only these datasets are addressable through the replay API
 REPLAY_DATASETS = frozenset(
@@ -75,12 +77,6 @@ class ReplayIndex:
                 })
         index.symbols = sorted(symbols)
         return index
-
-    def window(self, from_candle: int, to_candle: int) -> List[Dict[str, Any]]:
-        rows: List[Dict[str, Any]] = []
-        for candle in range(from_candle, to_candle + 1):
-            rows.extend(self.by_candle.get(candle, []))
-        return rows
 
     def tree_at(self, candle_index: Optional[int]) -> Optional[Dict[str, Any]]:
         if candle_index is None:
@@ -195,35 +191,7 @@ class ReplayService:
             "datasets": [d for d in dataset_ids if d in REPLAY_DATASETS],
             "markers": index.markers,
             "max_window_candles": MAX_REPLAY_WINDOW_CANDLES,
-        }
-
-    # ── Window ─────────────────────────────────────────────────────────────
-
-    async def get_window(
-        self, user_id: str, run_id: str, from_candle: int, to_candle: int
-    ) -> dict:
-        """One replay window: candles + pre-nested event trees + traces + indicators.
-        The frontend reconstructs nothing."""
-        self._validate_window(from_candle, to_candle)
-
-        reader = await self._reader(user_id, run_id)
-        manifest = await reader.get_manifest()
-        schema_version = self._validate_manifest(manifest)
-
-        candles_buf_rows = await self._read_windowed(reader, run_id, "candles", from_candle, to_candle, optional=True)
-        decision_traces = await self._read_windowed(reader, run_id, "decision_traces", from_candle, to_candle, optional=True)
-        indicators = await self._read_windowed(reader, run_id, "indicator_snapshots", from_candle, to_candle, optional=True)
-
-        index = await self._load_index(reader, run_id)
-
-        return {
-            "schema_version": schema_version,
-            "from_candle": from_candle,
-            "to_candle": to_candle,
-            "candles": candles_buf_rows,
-            "candle_trees": build_candle_trees(index.window(from_candle, to_candle)),
-            "decision_traces": decision_traces,
-            "indicator_snapshots": indicators,
+            "chunk_size": CHUNK_SIZE,
         }
 
     # ── Trade inspector ────────────────────────────────────────────────────
@@ -307,6 +275,92 @@ class ReplayService:
                 if "source" in row:
                     row["datasource"] = row.pop("source")
         return 200, rows
+
+    # ── Replay chunks (Arrow IPC, immutable, browser-cacheable) ─────────────
+
+    async def _chunk_candle_range(self, reader: WorkspaceReader, chunk_id: int) -> tuple[int, int]:
+        """[from_candle, to_candle] for a chunk id, anchored to the run's real
+        first_candle_index (indicator warmup means it's rarely 0)."""
+        try:
+            candles_buf = await reader.get_dataset_bytes("candles")
+        except ResourceNotFoundException:
+            raise ValidationException("Run has no candles dataset — cannot resolve chunk range.")
+        first_candle_index, _ = ArrowReader.candle_index_bounds(candles_buf)
+        if first_candle_index is None:
+            raise ValidationException("Run's candles dataset is empty.")
+        from_candle = first_candle_index + chunk_id * CHUNK_SIZE
+        return from_candle, from_candle + CHUNK_SIZE - 1
+
+    async def get_dataset_chunk(
+        self, user_id: str, run_id: str, dataset_name: str, chunk_id: int
+    ) -> bytes:
+        """One Arrow-IPC chunk of a single allowlisted dataset — the binary,
+        immutable, cacheable counterpart to get_dataset_window."""
+        if dataset_name not in REPLAY_DATASETS:
+            raise ValidationException(
+                f"Dataset '{dataset_name}' is not replayable. Allowed: {sorted(REPLAY_DATASETS)}"
+            )
+        if chunk_id < 0:
+            raise ValidationException("chunk_id must be >= 0.")
+
+        reader = await self._reader(user_id, run_id)
+        manifest = await reader.get_manifest()
+        self._validate_manifest(manifest)
+
+        from_candle, to_candle = await self._chunk_candle_range(reader, chunk_id)
+
+        try:
+            buf = await reader.get_dataset_bytes(dataset_name)
+        except ResourceNotFoundException:
+            return ArrowReader.empty_ipc_stream()
+
+        return ArrowReader.slice_chunk_to_ipc(buf, from_candle, to_candle, dataset_name)
+
+    async def get_chunk_manifest(self, user_id: str, run_id: str, chunk_id: int) -> dict:
+        """Lightweight metadata for one chunk — row counts + integrity info,
+        so the client can decide what to fetch without pulling every
+        per-dataset binary just to check if it's empty."""
+        if chunk_id < 0:
+            raise ValidationException("chunk_id must be >= 0.")
+
+        reader = await self._reader(user_id, run_id)
+        manifest = await reader.get_manifest()
+        schema_version = self._validate_manifest(manifest)
+
+        from_candle, to_candle = await self._chunk_candle_range(reader, chunk_id)
+
+        row_counts: Dict[str, int] = {}
+        datasets_available: List[str] = []
+        for dataset_name in sorted(REPLAY_DATASETS):
+            try:
+                buf = await reader.get_dataset_bytes(dataset_name)
+            except ResourceNotFoundException:
+                row_counts[dataset_name] = 0
+                continue
+            count = ArrowReader.count_in_candle_range(buf, from_candle, to_candle)
+            row_counts[dataset_name] = count
+            if count > 0:
+                datasets_available.append(dataset_name)
+
+        # Real integrity check over the actual bytes this chunk id resolves
+        # to (candles — the dataset every chunk is anchored on), not a
+        # placeholder: the underlying dataset manifests never populate their
+        # own `checksum` field (always ""), so there's nothing to "reuse".
+        try:
+            candles_buf = await reader.get_dataset_bytes("candles")
+            chunk_bytes = ArrowReader.slice_chunk_to_ipc(candles_buf, from_candle, to_candle, "candles")
+            checksum = hashlib.blake2b(chunk_bytes, digest_size=16).hexdigest()
+        except ResourceNotFoundException:
+            checksum = None
+
+        return {
+            "id": chunk_id,
+            "candle_range": [from_candle, to_candle],
+            "row_counts": row_counts,
+            "datasets_available": datasets_available,
+            "checksum": checksum,
+            "schema_version": schema_version,
+        }
 
     # ── Internals ──────────────────────────────────────────────────────────
 

@@ -226,8 +226,21 @@ async def _execute_backtest_internal(
         import msgpack
         artifact_size = len(msgpack.packb(report_payload, use_bin_type=True))
 
-        # report.msgpack.zstd (Core generates report.json, but the API wants msgpack for the dashboard)
-        await storage_service.upload_payload(paths.report, report_payload)
+        # Split-artifact delivery (see report_split.py): behind a flag so
+        # this is a no-op, zero-risk change until explicitly opted into. When
+        # on, per-tab sections replace the single monolithic report blob
+        # entirely for this run — cheaper to write (small msgpack, no zstd)
+        # and cheaper to read (only the open tab's section gets fetched, via
+        # the same /artifacts/{type} endpoint as the old monolithic report).
+        report_section_keys: dict[str, str] = {}
+        if settings.report_delivery_v2_enabled:
+            from app.modules.strategy_service.services.report_split import (
+                split_and_upload,
+            )
+            report_section_keys = await split_and_upload(paths, "BACKTEST", validated_dict)
+        else:
+            # report.msgpack.zstd (Core generates report.json, but the API wants msgpack for the dashboard)
+            await storage_service.upload_payload(paths.report, report_payload)
 
         # workspace.tar.zstd (Generated directly by WorkspaceBuilder)
         if archive_bytes:
@@ -274,9 +287,12 @@ async def _execute_backtest_internal(
 
                     artifact_manifest = {
                         "metadata": paths.metadata,
-                        "report": paths.report,
                         "workspace": paths.workspace,
                     }
+                    if report_section_keys:
+                        artifact_manifest.update(report_section_keys)
+                    else:
+                        artifact_manifest["report"] = paths.report
                     if runtime_events:
                         artifact_manifest["runtime"] = paths.runtime
                     if decision_traces:

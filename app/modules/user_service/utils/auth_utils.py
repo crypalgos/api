@@ -1,5 +1,6 @@
 import uuid
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import bcrypt
 from jose import JWTError, jwt
@@ -27,8 +28,8 @@ class JWTUtils:
     ACCESS_TOKEN_EXPIRE_MINUTES = settings.access_token_expire_minutes
 
     @staticmethod
-    def create_access_token(data: dict[str, str] = None) -> str:
-        to_encode = data.copy() if data else {}
+    def create_access_token(data: dict[str, Any] | None = None) -> str:
+        to_encode: dict[str, Any] = data.copy() if data else {}
         expire = datetime.now(UTC) + timedelta(
             minutes=JWTUtils.ACCESS_TOKEN_EXPIRE_MINUTES
         )
@@ -38,7 +39,7 @@ class JWTUtils:
         )
 
     @staticmethod
-    def decode_access_token(token: str) -> dict[str, str] | None:
+    def decode_access_token(token: str) -> dict[str, Any] | None:
         try:
             payload = jwt.decode(
                 token, JWTUtils.ACCESS_TOKEN_SECRET_KEY, algorithms=[JWTUtils.ALGORITHM]
@@ -72,7 +73,7 @@ class JWTUtils:
         )
 
     @staticmethod
-    def decode_refresh_token(token: str) -> dict[str, str] | None:
+    def decode_refresh_token(token: str) -> dict[str, Any] | None:
         try:
             payload = jwt.decode(
                 token,
@@ -124,6 +125,10 @@ class VerificationCodeUtils:
         return datetime.now(UTC) + timedelta(minutes=15)
 
     @staticmethod
-    def is_verification_code_expired(expiry_time: datetime) -> bool:
+    def is_verification_code_expired(expiry_time: datetime | None) -> bool:
         """Check if verification code has expired"""
+        if expiry_time is None:
+            return True
+        if expiry_time.tzinfo is None:
+            expiry_time = expiry_time.replace(tzinfo=UTC)
         return datetime.now(UTC) > expiry_time

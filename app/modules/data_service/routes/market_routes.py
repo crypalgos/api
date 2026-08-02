@@ -1,16 +1,18 @@
+import asyncio
 import json
 import logging
-import asyncio
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query
-from fastapi.responses import JSONResponse
 from decimal import Decimal
 from typing import Dict, Set
+
+from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
+from fastapi.responses import JSONResponse
+
 from app.advices.base_response_handler import BaseResponseHandler
-from app.modules.data_service.services.orderbook_projection import (
-    orderbook_registry,
-    OrderBookSnapshot,
-)
 from app.modules.data_service.live_feed import live_feed_subscriber
+from app.modules.data_service.services.orderbook_projection import (
+    OrderBookSnapshot,
+    orderbook_registry,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -101,10 +103,11 @@ class OrderBookWSManager:
         # Callback to route ZMQ messages to our queue
         async def on_feed_update(topic: str, data: dict):
             # Parse only l2_updates for this symbol
-            if topic == f"l2_updates.delta" and data.get("symbol") == symbol:
+            if topic == "l2_updates.delta" and data.get("symbol") == symbol:
                 await queue.put(data)
 
-        live_feed_subscriber.register_callback(on_feed_update)
+        live_feed_subscriber.register_callback(symbol, on_feed_update)
+        await live_feed_subscriber.start()
 
         try:
             while True:
@@ -126,7 +129,7 @@ class OrderBookWSManager:
         except asyncio.CancelledError:
             logger.info(f"Cancelled ZMQ subscription task for {symbol}")
         finally:
-            live_feed_subscriber.unregister_callback(on_feed_update)
+            live_feed_subscriber.unregister_callback(symbol, on_feed_update)
 
 
 ws_manager = OrderBookWSManager()
