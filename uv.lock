@@ -240,8 +240,8 @@ requires-dist = [
     { name = "boto3", specifier = ">=1.34.0" },
     { name = "celery", specifier = ">=5.4.0" },
     { name = "clickhouse-connect", specifier = ">=0.11.0" },
-    { name = "crypalgos-core", directory = "../crypalgos_core" },
-    { name = "crypalgos-data", directory = "../crypalgos-data" },
+    { name = "crypalgos-core", git = "https://github.com/crypalgos/crypalgos_core.git?branch=master" },
+    { name = "crypalgos-data", git = "https://github.com/crypalgos/crypalgos-data.git?branch=master" },
     { name = "fastapi", extras = ["standard"], specifier = ">=0.128.5" },
     { name = "google-auth", specifier = ">=2.53.0" },
     { name = "jesse-rust", specifier = "==1.1.0" },
@@ -822,7 +822,7 @@ wheels = [
 [[package]]
 name = "crypalgos-core"
 version = "3.0.0"
-source = { directory = "../crypalgos_core" }
+source = { git = "https://github.com/crypalgos/crypalgos_core.git?branch=master#4f1d41b28eda9e74b87e91543d547bf71cc14397" }
 dependencies = [
     { name = "clickhouse-connect" },
     { name = "crypalgos-data" },
@@ -835,45 +835,15 @@ dependencies = [
     { name = "zstandard" },
 ]
 
-[package.metadata]
-requires-dist = [
-    { name = "clickhouse-connect", specifier = ">=0.11.0" },
-    { name = "crypalgos-data", directory = "../crypalgos-data" },
-    { name = "jesse-rust", specifier = "==1.1.0" },
-    { name = "numpy", specifier = ">=2.4.2" },
-    { name = "polars", specifier = ">=1.38.1" },
-    { name = "pytest", specifier = ">=9.1.1" },
-    { name = "python-dateutil", specifier = ">=2.8.2" },
-    { name = "python-dotenv", specifier = ">=1.2.2" },
-    { name = "zstandard", specifier = ">=0.22.0" },
-]
-
 [[package]]
 name = "crypalgos-data"
 version = "0.1.0"
-source = { directory = "../crypalgos-data" }
+source = { git = "https://github.com/crypalgos/crypalgos-data.git?branch=master#785cfde79f7a6b919e647f832637c634547fb5ee" }
 dependencies = [
     { name = "httpx" },
     { name = "pydantic" },
     { name = "pyzmq" },
     { name = "websockets" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "httpx", specifier = ">=0.28.1" },
-    { name = "pydantic", specifier = ">=2.0.0" },
-    { name = "pyzmq", specifier = ">=27.1.0" },
-    { name = "websockets", specifier = ">=16.0" },
-]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "pytest", specifier = ">=8.0.0" },
-    { name = "pytest-asyncio", specifier = ">=1.3.0" },
-    { name = "pytest-cov", specifier = ">=7.1.0" },
-    { name = "pytest-mock", specifier = ">=3.15.1" },
-    { name = "requests-mock", specifier = ">=1.12.1" },
 ]
 
 [[package]]
