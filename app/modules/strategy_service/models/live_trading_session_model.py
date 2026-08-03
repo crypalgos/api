@@ -1,9 +1,9 @@
 import uuid
 from datetime import datetime
 from enum import StrEnum
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Any, Dict, Optional
 
-from sqlalchemy import DateTime, ForeignKey, Index, String, text
+from sqlalchemy import JSON, DateTime, ForeignKey, Index, String, text
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
@@ -14,6 +14,9 @@ if TYPE_CHECKING:
     from app.modules.strategy_service.models.strategy_model import Strategy
     from app.modules.strategy_service.models.strategy_version_model import (
         StrategyVersion,
+    )
+    from app.modules.user_service.models.credential_model import (
+        BrokerCredential,
     )
 
 
@@ -120,6 +123,14 @@ class LiveTradingSession(Base):
     # Last processed bar epoch_ms — enables safe resume after crash (RECOVERING).
     last_processed_timestamp: Mapped[Optional[int]] = mapped_column(nullable=True)
 
+    # {candles, strategy_events, session_metadata: s3_key}, populated once the
+    # local workspace has been uploaded and verified (SessionWorkspaceArchive
+    # .close()) — NULL means still running, or archived-but-not-yet-uploaded
+    # (crash recovery sweep picks these up). Mirrors ResearchRun.artifact_manifest.
+    artifact_manifest: Mapped[Dict[str, Any] | None] = mapped_column(
+        JSON, nullable=True
+    )
+
     started_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
@@ -143,8 +154,12 @@ class LiveTradingSession(Base):
     version: Mapped[Optional["StrategyVersion"]] = relationship(
         "StrategyVersion", back_populates="live_sessions"
     )
+    credential: Mapped[Optional["BrokerCredential"]] = relationship(
+        "BrokerCredential"
+    )
 
 
 # Import here to avoid circular imports during mapper initialization
 from app.modules.strategy_service.models.strategy_model import Strategy
 from app.modules.strategy_service.models.strategy_version_model import StrategyVersion
+from app.modules.user_service.models.credential_model import BrokerCredential

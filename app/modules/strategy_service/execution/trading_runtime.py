@@ -316,11 +316,15 @@ class TradingRuntime:
             self.event_publisher.record_metrics(events)
         return events
 
-    async def flush(self) -> None:
-        """Force-flush events and close the deterministic Testnet archive."""
+    async def flush(self) -> dict[str, str] | None:
+        """Force-flush events and finalize the deterministic Testnet archive
+        (upload -> verify -> delete local). Returns the artifact manifest to
+        persist on the session row, or None if there's no archive for this
+        session (non-Testnet) or archiving failed and should be retried later."""
         await self.event_publisher.flush()
         if self.session_archive is not None:
-            self.session_archive.close()
+            return await self.session_archive.close()
+        return None
 
 
 class RuntimeFactory:
@@ -619,6 +623,7 @@ class RuntimeFactory:
         indicator_warmup = RuntimeFactory._seed_indicators(strategy, warmup_candles)
         session_archive = (
             SessionWorkspaceArchive(
+                session.strategy_id,
                 session.id,
                 {
                     "execution_mode": session.mode,

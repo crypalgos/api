@@ -1,6 +1,6 @@
 import logging
 from datetime import datetime, timezone
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -159,6 +159,22 @@ class LiveTradingSessionRepository(BaseRepository[LiveTradingSession]):
         if stopped_at is not None:
             live_session.stopped_at = stopped_at
 
+        await self.session.commit()
+        await self.session.refresh(live_session)
+        return live_session
+
+    async def update_artifact_manifest(
+        self, session_id: str, artifact_manifest: Dict[str, Any]
+    ) -> Optional[LiveTradingSession]:
+        """Record the S3 keys for a finalized workspace archive — only ever
+        called after SessionWorkspaceArchive.close() has confirmed every
+        file uploaded, so a non-null manifest always means "safe to have
+        deleted the local workspace."""
+        live_session = await self.get_by_id(session_id)
+        if not live_session:
+            return None
+
+        live_session.artifact_manifest = artifact_manifest
         await self.session.commit()
         await self.session.refresh(live_session)
         return live_session

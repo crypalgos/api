@@ -51,6 +51,7 @@ def _fake_session(mode: str, credential_id: str | None) -> SimpleNamespace:
     strategy = SimpleNamespace(user_id="user-1", compiled_code=COMPILED_CODE)
     return SimpleNamespace(
         id="sess-1",
+        strategy_id="strat-1",
         mode=mode,
         broker="delta",
         exchange="delta",

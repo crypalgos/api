@@ -10,7 +10,7 @@ from dataclasses import dataclass
 class ArtifactPaths:
     strategy_id: str
     run_id: str
-    kind: str = "backtests"  # backtests | walkforwards | montecarlos | optimizations
+    kind: str = "backtests"  # backtests | walkforwards | montecarlos | optimizations | live-sessions
 
     @property
     def base(self) -> str:
@@ -56,6 +56,20 @@ class ArtifactPaths:
         crypalgos_core.montecarlo.reporting.build_montecarlo_report() writes
         these as flat Arrow IPC files (not bundled in a workspace archive)."""
         return f"{self.base}/datasets/montecarlo/{name}.arrow"
+
+    @property
+    def live_candles(self) -> str:
+        """kind='live-sessions', run_id=session_id. Same parquet file
+        SessionWorkspaceArchive writes locally — uploaded as-is, no re-encode."""
+        return f"{self.base}/candles.parquet"
+
+    @property
+    def live_events(self) -> str:
+        return f"{self.base}/strategy_events.msgpack"
+
+    @property
+    def live_session_metadata(self) -> str:
+        return f"{self.base}/session.json"
 
     def walkforward_dataset(self, name: str) -> str:
         """Chart datasets referenced by WalkForwardReport.charts[*].dataset —

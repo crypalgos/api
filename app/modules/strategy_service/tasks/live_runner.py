@@ -110,7 +110,9 @@ class LiveTradingRunner:
                 await self._tick_source.stop()
             if self._runtime is not None:
                 try:
-                    await self._runtime.flush()
+                    manifest = await self._runtime.flush()
+                    if manifest is not None:
+                        await self._persist_artifact_manifest(manifest)
                 except SessionArchiveError as e:
                     logger.exception(
                         "[%s] Deterministic archive failed while flushing.",
@@ -277,6 +279,26 @@ class LiveTradingRunner:
                 f"[{self.session_id}] Failed to update status to {status}: {e}"
             )
             return False
+
+    async def _persist_artifact_manifest(self, manifest: dict[str, str]) -> None:
+        """Record the S3 keys SessionWorkspaceArchive.close() just confirmed
+        uploaded. The local workspace is already deleted by this point --
+        this only fails to persist the *pointer*, never loses the data itself."""
+        try:
+            from app.db.connect_db import AsyncSessionLocal
+            from app.modules.strategy_service.repositories.live_trading_session_repository import (
+                LiveTradingSessionRepository,
+            )
+
+            async with AsyncSessionLocal() as session:
+                repo = LiveTradingSessionRepository(session)
+                await repo.update_artifact_manifest(self.session_id, manifest)
+        except Exception:
+            logger.exception(
+                "[%s] Failed to persist artifact manifest %s.",
+                self.session_id,
+                manifest,
+            )
 
     async def _update_heartbeat(self) -> None:
         try:

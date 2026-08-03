@@ -265,7 +265,9 @@ class LiveServiceMixin:
                 TestnetTimelineDataSource,
             )
 
-            timeline = await TestnetTimelineDataSource(session_id).load_timeline(
+            timeline = await TestnetTimelineDataSource(
+                session_id, session.artifact_manifest
+            ).load_timeline(
                 since=since,
                 limit=limit,
             )
@@ -300,7 +302,7 @@ class LiveServiceMixin:
 
         session = await self.get_owned_session(user_id, session_id)
         if session.environment == SessionEnvironment.TESTNET:
-            source = TestnetTimelineDataSource(session.id)
+            source = TestnetTimelineDataSource(session.id, session.artifact_manifest)
         else:
             source = ProductionTimelineDataSource(
                 session.id,

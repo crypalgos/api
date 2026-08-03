@@ -26,10 +26,16 @@ class TimelineDataSource(Protocol):
 
 
 class TestnetTimelineDataSource:
-    """Reads the local archive created for a Testnet session."""
+    """Reads a Testnet session's archive -- the local workspace while it's
+    still running (or before archival completes), the S3-uploaded copy via
+    `artifact_manifest` once SessionWorkspaceArchive.close() has deleted the
+    local files."""
 
-    def __init__(self, session_id: str) -> None:
+    def __init__(
+        self, session_id: str, artifact_manifest: Mapping[str, str] | None = None
+    ) -> None:
         self.session_id = session_id
+        self.artifact_manifest = artifact_manifest
 
     async def load_timeline(
         self,
@@ -37,9 +43,12 @@ class TestnetTimelineDataSource:
         since: datetime | None = None,
         limit: int | None = None,
     ) -> dict[str, Any]:
+        raw_events = await SessionWorkspaceArchive.read_events(
+            self.session_id, self.artifact_manifest
+        )
         events = [
             _archive_event_to_timeline(event, self.session_id, index)
-            for index, event in enumerate(SessionWorkspaceArchive.read_events(self.session_id))
+            for index, event in enumerate(raw_events)
         ]
         if since is not None:
             cutoff = _as_utc_datetime(since)
@@ -54,7 +63,9 @@ class TestnetTimelineDataSource:
         return {"session_id": self.session_id, "events": events}
 
     async def load_candles(self) -> list[list[float | int]]:
-        return SessionWorkspaceArchive.read_candles(self.session_id)
+        return await SessionWorkspaceArchive.read_candles(
+            self.session_id, self.artifact_manifest
+        )
 
 
 class ProductionTimelineDataSource:

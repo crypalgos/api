@@ -3,8 +3,8 @@ from typing import Any
 
 import boto3
 import msgpack
-import zstandard as zstd
 import pyarrow as pa
+import zstandard as zstd
 from botocore.exceptions import ClientError
 
 from app.config.settings import settings
@@ -57,6 +57,20 @@ class StorageService:
             self.s3_client.put_object, Bucket=self.s3_bucket, Key=key, Body=data
         )
         return key
+
+    async def object_exists(self, key: str) -> bool:
+        """HEAD check — the verify step of an upload-then-delete-local flow
+        (live session archiving). S3 PUTs are strongly consistent, so this is
+        belt-and-suspenders rather than a race condition guard, but it's the
+        actual confirmation a caller needs before treating local data as
+        safe to discard."""
+        try:
+            await asyncio.to_thread(
+                self.s3_client.head_object, Bucket=self.s3_bucket, Key=key
+            )
+            return True
+        except ClientError:
+            return False
 
     async def download_raw_payload(self, key: str) -> bytes:
         """Downloads raw bytes from S3 without decompressing or unpacking."""

@@ -1,9 +1,14 @@
-"""Synchronous local archive for one testnet live-session workspace."""
+"""Local-first archive for one testnet live-session workspace, finalized to
+S3 on close() — same upload -> verify -> delete lifecycle as research run
+artifacts (see ArtifactPaths, StorageService), so a live session's execution
+record gets the same durability/debuggability guarantees as a backtest's."""
 
 from __future__ import annotations
 
 import json
+import logging
 import os
+import shutil
 from collections.abc import Iterable, Mapping, Sequence
 from datetime import date, datetime
 from pathlib import Path
@@ -15,6 +20,8 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from app.config.settings import settings
+
+logger = logging.getLogger(__name__)
 
 CANDLE_SCHEMA = pa.schema(
     [
@@ -30,15 +37,20 @@ _CANDLE_COLUMNS = ("timestamp_ms", "open", "high", "low", "close", "volume")
 
 
 class SessionArchiveError(RuntimeError):
-    """An archive write failed, so deterministic Testnet replay is no longer safe."""
+    """A local archive write failed, so deterministic Testnet replay is no longer safe."""
 
 
 class SessionWorkspaceArchive:
-    """Persist testnet candles and engine events below one session directory."""
+    """Persist testnet candles and engine events below one session directory,
+    then finalize (upload + verify + delete local) on close()."""
 
     def __init__(
-        self, session_id: str, metadata: Mapping[str, Any] | None = None
+        self,
+        strategy_id: str,
+        session_id: str,
+        metadata: Mapping[str, Any] | None = None,
     ) -> None:
+        self.strategy_id = strategy_id
         self.session_id = session_id
         self.session_dir = self._session_dir(session_id)
         self.session_dir.mkdir(parents=True, exist_ok=True)
@@ -52,7 +64,7 @@ class SessionWorkspaceArchive:
     def _workspace_root() -> Path:
         # The setting is added by deployment configuration. The fallback keeps
         # this isolated module importable in older local configurations.
-        return Path(getattr(settings, "live_session_workspace_dir", "workspaces/live"))
+        return Path(getattr(settings, "live_session_workspace_dir", "workspaces/live-sessions"))
 
     @classmethod
     def _session_dir(cls, session_id: str) -> Path:
@@ -63,6 +75,7 @@ class SessionWorkspaceArchive:
             return
         document = {
             "session_id": self.session_id,
+            "strategy_id": self.strategy_id,
             "created_at": datetime.now().astimezone().isoformat(),
             "archive_format": "testnet-workspace-v1",
         }
@@ -119,16 +132,104 @@ class SessionWorkspaceArchive:
             stream.flush()
             os.fsync(stream.fileno())
 
-    def close(self) -> None:
-        """Mark the archive closed; writes are synchronous and already durable."""
+    async def close(self) -> dict[str, str] | None:
+        """Finalize the workspace: upload every artifact that exists on
+        local disk, verify each upload, delete the local directory only
+        once every upload is confirmed, and return {section: s3_key}.
+
+        Never deletes before every upload verifies. On any failure, the
+        local directory is left completely untouched (not marked closed
+        either) so a retry — explicit or the startup recovery sweep — can
+        pick it back up. append_candles/append_events already write
+        synchronously and fsync durably, so there is no separate "flush
+        writers" step needed here."""
+        if self._closed:
+            return None
+
+        self._stamp_closed_at()
+
+        from app.modules.strategy_service.services.storage_service import (
+            storage_service,
+        )
+        from app.utils.artifact_paths import ArtifactPaths
+
+        paths = ArtifactPaths(
+            strategy_id=self.strategy_id, run_id=self.session_id, kind="live-sessions"
+        )
+        uploads: dict[str, tuple[Path, str]] = {
+            "candles": (self.candles_path, paths.live_candles),
+            "strategy_events": (self.events_path, paths.live_events),
+            "session_metadata": (self.metadata_path, paths.live_session_metadata),
+        }
+
+        manifest: dict[str, str] = {}
+        for name, (local_path, s3_key) in uploads.items():
+            if not local_path.exists():
+                continue
+            try:
+                data = local_path.read_bytes()
+                await storage_service.upload_raw_payload(s3_key, data)
+                if not await storage_service.object_exists(s3_key):
+                    raise SessionArchiveError(
+                        f"Upload of {name} did not verify for session {self.session_id}"
+                    )
+                manifest[name] = s3_key
+            except Exception:
+                logger.exception(
+                    "Failed to archive %s for session %s -- local workspace "
+                    "kept intact for retry.",
+                    name,
+                    self.session_id,
+                )
+                return None
+
+        shutil.rmtree(self.session_dir, ignore_errors=True)
         self._closed = True
+        return manifest
+
+    def _stamp_closed_at(self) -> None:
+        try:
+            document = (
+                json.loads(self.metadata_path.read_text(encoding="utf-8"))
+                if self.metadata_path.exists()
+                else {"session_id": self.session_id}
+            )
+            document["closed_at"] = datetime.now().astimezone().isoformat()
+            self.metadata_path.write_text(
+                json.dumps(document, default=str, indent=2, sort_keys=True),
+                encoding="utf-8",
+            )
+        except Exception:
+            logger.exception(
+                "Failed to stamp closed_at for session %s", self.session_id
+            )
 
     @staticmethod
-    def read_candles(session_id: str) -> list[list[float | int]]:
+    async def read_candles(
+        session_id: str, manifest: Mapping[str, str] | None = None
+    ) -> list[list[float | int]]:
+        """Local file if the session is still running (or archival hasn't
+        happened yet); falls back to the archived S3 copy via `manifest`
+        (LiveTradingSession.artifact_manifest) once the local workspace has
+        been deleted."""
         candles_path = SessionWorkspaceArchive._session_dir(session_id) / "candles.parquet"
-        if not candles_path.exists():
+        if candles_path.exists():
+            table = pq.read_table(candles_path).cast(CANDLE_SCHEMA)
+            return SessionWorkspaceArchive._candles_table_to_rows(table)
+
+        s3_key = (manifest or {}).get("candles")
+        if not s3_key:
             return []
-        table = pq.read_table(candles_path).cast(CANDLE_SCHEMA)
+        from app.modules.strategy_service.services.storage_service import (
+            storage_service,
+        )
+
+        raw = await storage_service.download_raw_payload(s3_key)
+        table = pq.read_table(pa.BufferReader(raw)).cast(CANDLE_SCHEMA)
+        return SessionWorkspaceArchive._candles_table_to_rows(table)
+
+    @staticmethod
+    def _candles_table_to_rows(table: pa.Table) -> list[list[float | int]]:
         columns = table.to_pydict()
         return [
             [
@@ -143,13 +244,28 @@ class SessionWorkspaceArchive:
         ]
 
     @staticmethod
-    def read_events(session_id: str) -> list[dict[str, Any]]:
+    async def read_events(
+        session_id: str, manifest: Mapping[str, str] | None = None
+    ) -> list[dict[str, Any]]:
+        """Local file if present, else falls back to the archived S3 copy
+        via `manifest` (LiveTradingSession.artifact_manifest)."""
         events_path = SessionWorkspaceArchive._session_dir(session_id) / "strategy_events.msgpack"
-        if not events_path.exists():
+        if events_path.exists():
+            with events_path.open("rb") as stream:
+                unpacker = msgpack.Unpacker(stream, raw=False, strict_map_key=False)
+                return [dict(record) for record in unpacker]
+
+        s3_key = (manifest or {}).get("strategy_events")
+        if not s3_key:
             return []
-        with events_path.open("rb") as stream:
-            unpacker = msgpack.Unpacker(stream, raw=False, strict_map_key=False)
-            return [dict(record) for record in unpacker]
+        from app.modules.strategy_service.services.storage_service import (
+            storage_service,
+        )
+
+        raw = await storage_service.download_raw_payload(s3_key)
+        unpacker = msgpack.Unpacker(raw=False, strict_map_key=False)
+        unpacker.feed(raw)
+        return [dict(record) for record in unpacker]
 
     @staticmethod
     def _normalize_candle(row: Sequence[Any]) -> list[float | int]:
