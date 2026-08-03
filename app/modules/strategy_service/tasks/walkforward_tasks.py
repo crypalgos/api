@@ -26,6 +26,7 @@ from app.modules.strategy_service.models.research_run_model import (
     ResearchRun,
     StrategyLatestResults,
 )
+from app.modules.strategy_service.services.progress_service import ProgressService
 from app.modules.strategy_service.services.storage_service import storage_service
 from app.modules.strategy_service.tasks.task_utils import (
     AsyncProgressFlusher,
@@ -130,9 +131,30 @@ async def _execute_walkforward_internal(
         flusher = AsyncProgressFlusher(run_id, RunType.WALKFORWARD)
         flusher_task = asyncio.create_task(flusher.start_polling())
 
+        def on_sub_progress(
+            window_index: int, total_windows: int, completed_units: int, total_units: int
+        ) -> None:
+            # Intra-window smoothing: the train-period parameter sweep is the
+            # dominant cost of a window, so combine "how far along the
+            # CURRENT window's sweep is" with "how many whole windows are
+            # already behind us" into one continuously-moving percentage --
+            # otherwise a 3-window run only ever jumps 0% -> 33% -> 66% ->
+            # 100% at window boundaries. Ephemeral only (publish_fine_grained
+            # never touches Postgres); flusher.update()'s own coarse,
+            # persisted window count is unaffected.
+            window_fraction = completed_units / total_units if total_units else 0.0
+            overall_percent = int(((window_index + window_fraction) / total_windows) * 100)
+            flusher.publish_fine_grained(
+                overall_percent,
+                f"Window {window_index + 1} / {total_windows} · "
+                f"Combination {completed_units} / {total_units}",
+            )
+
         wf_engine = WalkForwardEngine()
         try:
-            result = await asyncio.to_thread(wf_engine.run, job, flusher.update)
+            result = await asyncio.to_thread(
+                wf_engine.run, job, flusher.update, on_sub_progress
+            )
         finally:
             flusher.stop()
             await flusher_task
@@ -215,7 +237,7 @@ async def _execute_walkforward_internal(
         summary_json = {
             "net_profit": float(report.aggregate_metrics.get("mean_net_profit", 0.0)),
             "total_return_pct": float(
-                report.aggregate_metrics.get("mean_total_return_pct", 0.0)
+                report.aggregate_metrics.get("mean_profit_pct", 0.0)
             ),
             "sharpe_ratio": (
                 float(report.aggregate_metrics.get("mean_sharpe_ratio", 0.0))
@@ -291,6 +313,10 @@ async def _execute_walkforward_internal(
                     latest = StrategyLatestResults(strategy_id=strategy_id)
                     session.add(latest)
                 latest.latest_walkforward_id = run_id
+
+        ProgressService.publish(
+            run_id, {"version": 1, "status": JobStatus.COMPLETED.value, "progress": 100}
+        )
 
         logger.info(
             f"Walk-forward run {run_id} completed with {len(result.windows)} windows."
