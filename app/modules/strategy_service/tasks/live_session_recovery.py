@@ -50,6 +50,30 @@ def _register_all_models() -> None:
 
 
 async def _recover_one(session_id: str) -> None:
+    """Orphan-detection decision tree for one local session directory,
+    keyed only on the matching LiveTradingSession row -- never on wall-clock
+    guesses about how long the directory has existed:
+
+    1. No matching DB row at all -> leave it, log a warning (data-integrity
+       edge case, not something to guess a strategy_id for).
+    2. Row exists and `artifact_manifest` is already set -> the DB says this
+       was archived already; a local copy is redundant, delete it outright
+       (no re-upload).
+    3. Row exists, no manifest yet, status is STARTING/RUNNING/STOPPING ->
+       call reap_if_stale() (the same heartbeat-staleness check every read
+       path already reconciles through: heartbeat_at/updated_at older than
+       STALE_HEARTBEAT_THRESHOLD_SECS=30 / STALE_STARTING_THRESHOLD_SECS=60
+       in live_trading_session_repository.py). If it's still not stale
+       (fresh heartbeat), this is a genuinely active session on some other
+       worker or about to resume on this one -- leave it untouched.
+    4. Status is STOPPED or ERROR (either already, or just flipped there by
+       reap_if_stale in step 3) -> archive it now.
+
+    No independent "how old is this directory" heuristic exists here on
+    purpose: the DB row is the single source of truth for whether a session
+    is really over, so this can't disagree with what the rest of the
+    codebase (status pages, the fleet view, reap_if_stale's own callers)
+    already considers that session's state to be."""
     from app.db.connect_db import AsyncSessionLocal
     from app.modules.strategy_service.repositories.live_trading_session_repository import (
         LiveTradingSessionRepository,

@@ -58,19 +58,31 @@ class StorageService:
         )
         return key
 
-    async def object_exists(self, key: str) -> bool:
+    async def object_exists(self, key: str, expected_size: int | None = None) -> bool:
         """HEAD check — the verify step of an upload-then-delete-local flow
-        (live session archiving). S3 PUTs are strongly consistent, so this is
-        belt-and-suspenders rather than a race condition guard, but it's the
-        actual confirmation a caller needs before treating local data as
-        safe to discard."""
+        (live session archiving). S3 PUTs are strongly consistent and atomic
+        (a successful PUT is never partially visible — a HEAD/GET either sees
+        the complete new object or the previous one), so existence alone
+        already rules out a truncated/partial write; this isn't a race-
+        condition guard. When `expected_size` is given (the local file's
+        byte count), also compares it against the object's ContentLength —
+        catches the case where the PUT call itself silently succeeded against
+        the wrong key/bucket state rather than genuine mid-transfer
+        corruption, which TLS already rules out. Not a full checksum/ETag
+        comparison: S3 already guarantees byte-for-byte integrity on a
+        successful PUT (rejects the call on a transfer error), so re-deriving
+        that guarantee client-side would be redundant — size is the cheap
+        check for "is this actually the object I just wrote," not corruption
+        detection."""
         try:
-            await asyncio.to_thread(
+            response = await asyncio.to_thread(
                 self.s3_client.head_object, Bucket=self.s3_bucket, Key=key
             )
-            return True
         except ClientError:
             return False
+        if expected_size is not None and response.get("ContentLength") != expected_size:
+            return False
+        return True
 
     async def download_raw_payload(self, key: str) -> bytes:
         """Downloads raw bytes from S3 without decompressing or unpacking."""

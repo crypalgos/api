@@ -142,7 +142,21 @@ class SessionWorkspaceArchive:
         either) so a retry — explicit or the startup recovery sweep — can
         pick it back up. append_candles/append_events already write
         synchronously and fsync durably, so there is no separate "flush
-        writers" step needed here."""
+        writers" step needed here.
+
+        Idempotency on retry: every call re-uploads all three files that
+        still exist locally, with no partial-completion tracking across
+        calls — if the previous attempt got candles uploaded but failed on
+        strategy_events, a retry re-uploads candles too, not just the one
+        that failed. This is deliberate, not an oversight: S3 PUT to the
+        same deterministic key (ArtifactPaths.live_candles/live_events/
+        live_session_metadata, derived from strategy_id+session_id) always
+        overwrites, so re-uploading unchanged local data is wasted bandwidth
+        but never corrupts anything or produces a duplicate. The only side
+        effect that matters -- deleting the local directory -- still only
+        happens after *this* attempt's manifest is complete, so a session
+        can be retried an unbounded number of times before it's ever
+        actually archived."""
         if self._closed:
             return None
 
@@ -169,7 +183,7 @@ class SessionWorkspaceArchive:
             try:
                 data = local_path.read_bytes()
                 await storage_service.upload_raw_payload(s3_key, data)
-                if not await storage_service.object_exists(s3_key):
+                if not await storage_service.object_exists(s3_key, expected_size=len(data)):
                     raise SessionArchiveError(
                         f"Upload of {name} did not verify for session {self.session_id}"
                     )

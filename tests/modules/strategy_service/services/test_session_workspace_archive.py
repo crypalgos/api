@@ -24,10 +24,19 @@ class _FakeStorageService:
     """In-memory stand-in for storage_service -- captures every upload so
     tests can assert on exact bytes/keys without a real S3 call."""
 
-    def __init__(self, fail_keys: set[str] | None = None, verify_fail_keys: set[str] | None = None):
+    def __init__(
+        self,
+        fail_keys: set[str] | None = None,
+        verify_fail_keys: set[str] | None = None,
+        corrupt_size_keys: set[str] | None = None,
+    ):
         self.uploaded: dict[str, bytes] = {}
         self.fail_keys = fail_keys or set()
         self.verify_fail_keys = verify_fail_keys or set()
+        # Keys whose HEAD reports a size that doesn't match what was
+        # actually uploaded -- simulates a wrong-key/wrong-object mixup that
+        # a bare existence check wouldn't catch.
+        self.corrupt_size_keys = corrupt_size_keys or set()
 
     async def upload_raw_payload(self, key: str, data: bytes) -> str:
         if key in self.fail_keys:
@@ -35,10 +44,20 @@ class _FakeStorageService:
         self.uploaded[key] = data
         return key
 
-    async def object_exists(self, key: str) -> bool:
+    async def object_exists(self, key: str, expected_size: int | None = None) -> bool:
         if key in self.verify_fail_keys:
             return False
-        return key in self.uploaded
+        if key not in self.uploaded:
+            return False
+        if expected_size is not None:
+            actual_size = (
+                len(self.uploaded[key]) + 1
+                if key in self.corrupt_size_keys
+                else len(self.uploaded[key])
+            )
+            if actual_size != expected_size:
+                return False
+        return True
 
     async def download_raw_payload(self, key: str) -> bytes:
         return self.uploaded[key]
@@ -110,6 +129,27 @@ async def test_close_keeps_local_workspace_on_verify_failure(monkeypatch):
 
     paths = ArtifactPaths(strategy_id="strat-1", run_id="sess-fail-verify", kind="live-sessions")
     fake = _FakeStorageService(verify_fail_keys={paths.live_candles})
+    _patch_storage_service(monkeypatch, fake)
+
+    manifest = await archive.close()
+
+    assert manifest is None
+    assert session_dir.exists()
+
+
+@pytest.mark.asyncio
+async def test_close_keeps_local_workspace_when_uploaded_object_has_wrong_size(monkeypatch):
+    """Existence alone isn't a strong enough verify -- close() must also
+    catch "something is at this key, but it isn't what we just uploaded"
+    (e.g. a wrong-bucket/wrong-key mixup), via the ContentLength check in
+    storage_service.object_exists()."""
+    archive = await _make_archive_with_data(session_id="sess-corrupt-size")
+    session_dir = archive.session_dir
+
+    from app.utils.artifact_paths import ArtifactPaths
+
+    paths = ArtifactPaths(strategy_id="strat-1", run_id="sess-corrupt-size", kind="live-sessions")
+    fake = _FakeStorageService(corrupt_size_keys={paths.live_candles})
     _patch_storage_service(monkeypatch, fake)
 
     manifest = await archive.close()
